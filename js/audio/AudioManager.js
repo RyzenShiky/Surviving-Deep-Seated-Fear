@@ -22,6 +22,7 @@ export class AudioManager {
   setMasterVolume(v) {
     if (this.master) this.master.gain.value = v;
   }
+
   setSfxVolume(v) {
     if (this.sfx) this.sfx.gain.value = v;
   }
@@ -62,9 +63,8 @@ export class AudioManager {
     osc.start();
     osc.stop(this.ctx.currentTime + 0.13);
   }
-}
 
-  /** One soft thud — rate/volume controlled by caller */
+  /** Soft heartbeat thud — rate/volume controlled by caller */
   playHeartbeat(volume = 0.2) {
     if (!this.ctx || !this.sfx || volume <= 0.01) return;
     const t0 = this.ctx.currentTime;
@@ -81,3 +81,4 @@ export class AudioManager {
     osc.start(t0);
     osc.stop(t0 + 0.2);
   }
+}
