@@ -63,3 +63,21 @@ export class AudioManager {
     osc.stop(this.ctx.currentTime + 0.13);
   }
 }
+
+  /** One soft thud — rate/volume controlled by caller */
+  playHeartbeat(volume = 0.2) {
+    if (!this.ctx || !this.sfx || volume <= 0.01) return;
+    const t0 = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(55, t0);
+    osc.frequency.exponentialRampToValueAtTime(28, t0 + 0.12);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(Math.min(0.45, volume), t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+    osc.connect(gain);
+    gain.connect(this.sfx);
+    osc.start(t0);
+    osc.stop(t0 + 0.2);
+  }

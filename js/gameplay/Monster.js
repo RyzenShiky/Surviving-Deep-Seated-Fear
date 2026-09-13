@@ -8,12 +8,6 @@ function distXZ(a, b) {
 }
 
 export class MonsterController {
-  /**
-   * @param {object} state GameState
-   * @param {number} index
-   * @param {array} colliders
-   * @param {object|null} room MultiplayerRoom (host only uses for damage)
-   */
   constructor(state, index = 0, colliders = [], room = null) {
     this.state = state;
     this.index = index;
@@ -30,6 +24,16 @@ export class MonsterController {
     this.room = room;
   }
 
+  /** Base speed multiplied by frenzy from suspicion + last heard intensity */
+  _frenzyMul(m) {
+    const sus = m.memory.suspicion || 0;
+    const intens = m.memory.lastHeardIntensity || 0;
+    // 1.0 calm → up to ~2.2 when full panic (loud + high suspicion)
+    const fromSus = sus / 100; // 0..1
+    const fromSound = Math.min(1, intens); // 0..1
+    return 1 + fromSus * 0.7 + fromSound * 0.5;
+  }
+
   update(dt, now) {
     const m = this.state.data.monsters[this.index];
     if (!m) return;
@@ -38,24 +42,28 @@ export class MonsterController {
     const events = this.state.data.world.activeSoundEvents.filter((e) => now - e.timestamp < 2.5);
     this.perception.update(m, events, now, dt);
 
+    const frenzy = this._frenzyMul(m);
+    const base = this.moveSpeed;
+
     switch (m.aiState) {
       case 'PATROL':
-        this.widePatrol(m, dt);
+        this.widePatrol(m, dt, base * 0.75 * Math.min(1.15, frenzy));
         break;
       case 'INVESTIGATE':
         if (m.memory.lastHeardPosition) {
-          this.moveToward(m, m.memory.lastHeardPosition, dt, this.moveSpeed * 1.25);
+          this.moveToward(m, m.memory.lastHeardPosition, dt, base * 1.25 * frenzy);
         }
         break;
       case 'SEARCH':
         if (!this.target || distXZ(m.position, this.target) < 1.5) {
           this.target = pickSearchTarget(m.memory);
         }
-        if (this.target) this.moveToward(m, this.target, dt, this.moveSpeed * 0.95);
+        if (this.target) this.moveToward(m, this.target, dt, base * 0.95 * frenzy);
         break;
       case 'CHASE':
+        // Full panic run when sound was loud
         if (m.memory.lastHeardPosition) {
-          this.moveToward(m, m.memory.lastHeardPosition, dt, this.moveSpeed * 1.85);
+          this.moveToward(m, m.memory.lastHeardPosition, dt, base * 1.9 * frenzy);
         }
         break;
     }
@@ -81,10 +89,6 @@ export class MonsterController {
     }
   }
 
-  /**
-   * Attack any nearby player: local host player + all remote players.
-   * Host authority only writes damage via room.applyDamage.
-   */
   _tryAttack(m) {
     if (this.attackCooldown > 0) return;
     const canAttack =
@@ -94,8 +98,6 @@ export class MonsterController {
     if (!canAttack) return;
 
     const targets = [];
-
-    // Local player (always present on host / solo)
     const local = this.state.data.player;
     if (local && local.alive !== false) {
       targets.push({
@@ -114,18 +116,15 @@ export class MonsterController {
       });
     }
 
-    // Remote multiplayer players (host only)
     if (this.room && this.room.isHost && this.room.remotePlayers) {
       for (const [uid, rp] of Object.entries(this.room.remotePlayers)) {
-        if (uid === this.room.uid) continue; // already handled as local
+        if (uid === this.room.uid) continue;
         if (rp.alive === false) continue;
         targets.push({
           kind: 'remote',
           uid,
           pos: { x: rp.x, y: rp.y, z: rp.z },
-          apply: (dmg) => {
-            this.room.applyDamage(uid, dmg);
-          },
+          apply: (dmg) => this.room.applyDamage(uid, dmg),
         });
       }
     }
@@ -140,7 +139,7 @@ export class MonsterController {
           radius: 35,
           type: 'impact',
         });
-        break; // one target per swing
+        break;
       }
     }
   }
@@ -154,11 +153,11 @@ export class MonsterController {
     m.rotation.yaw = Math.atan2(-dx, -dz);
   }
 
-  widePatrol(m, dt) {
+  widePatrol(m, dt, speed) {
     this.patrolAngle += dt * 0.12;
     const phase = this.index * 2.1;
     const tx = Math.cos(this.patrolAngle + phase) * (45 + this.index * 12);
     const tz = Math.sin(this.patrolAngle * 0.7 + phase) * (35 + this.index * 8) - 5;
-    this.moveToward(m, { x: tx, y: 0, z: tz }, dt, this.moveSpeed * 0.75);
+    this.moveToward(m, { x: tx, y: 0, z: tz }, dt, speed);
   }
 }

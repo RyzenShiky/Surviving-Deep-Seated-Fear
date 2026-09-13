@@ -5,6 +5,7 @@ import { isTouchDevice } from './core/Device.js';
 import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
+import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
@@ -21,6 +22,8 @@ let mode = 'solo';
 let netWriteAcc = 0;
 let profile = loadProfile();
 const ESCAPE_TIME = 300;
+let heartAcc = 0;
+let lastNearDist = Infinity;
 
 async function init() {
   const canvas = document.getElementById('game-canvas');
@@ -107,7 +110,11 @@ function setupLocalGame(fromSave = false) {
     } else {
       touch.keys = player.keys;
     }
-    touch.show();
+    touch.onFlashToggle = () => {
+        player.flashlightOn = !player.flashlightOn;
+        if (state.data.player) state.data.player.flashlight = player.flashlightOn;
+      };
+      touch.show();
   }
 }
 
@@ -361,6 +368,56 @@ function showGameOver(win) {
   }
 }
 
+
+
+function updateProximityUI(dist) {
+  const el = document.getElementById('danger-overlay');
+  const bpmEl = document.getElementById('heart-bpm');
+  const icon = document.getElementById('heart-icon');
+  const distEl = document.getElementById('monster-dist');
+  const { bpm, danger, near } = heartFromDistance(dist);
+  lastNearDist = dist;
+
+  if (distEl) {
+    if (Number.isFinite(dist) && dist < 40) {
+      distEl.textContent = dist < 2 ? 'VERY CLOSE' : dist.toFixed(1) + ' m';
+      distEl.style.color = dist < 6 ? '#c44' : dist < 14 ? '#c9a227' : 'rgba(180,170,160,0.7)';
+    } else {
+      distEl.textContent = '';
+    }
+  }
+
+  if (bpmEl) bpmEl.textContent = String(Math.round(bpm));
+
+  if (el) {
+    const op = danger;
+    el.style.setProperty('--danger-op', String(0.25 + op * 0.75));
+    el.style.opacity = String(op * 0.95);
+    if (op > 0.55) el.classList.add('pulse');
+    else el.classList.remove('pulse');
+  }
+
+  // schedule heartbeats by BPM
+  return bpm;
+}
+
+function tickHeartbeat(dt, bpm, danger) {
+  if (!audio || bpm < 60) return;
+  const interval = 60 / bpm;
+  heartAcc += dt;
+  if (heartAcc >= interval) {
+    heartAcc -= interval;
+    const vol = 0.08 + danger * 0.35;
+    audio.playHeartbeat(vol);
+    const icon = document.getElementById('heart-icon');
+    if (icon) {
+      icon.classList.remove('beat');
+      void icon.offsetWidth;
+      icon.classList.add('beat');
+    }
+  }
+}
+
 function startLoop() {
   if (running) return;
   running = true;
@@ -472,6 +529,10 @@ function startLoop() {
     const eye = player.eyePosition;
     const yaw = state.data.player.rotation.yaw;
     audio.setListenerPosition(eye.x, eye.y, eye.z, -Math.sin(yaw), -Math.cos(yaw));
+    const { dist: mDist } = nearestMonsterDist(state.data.player.position, state.data.monsters);
+    const { bpm, danger } = heartFromDistance(mDist);
+    updateProximityUI(mDist);
+    tickHeartbeat(dt, bpm, danger);
     renderer.render(state.data, eye, yaw, state.data.player.rotation.pitch);
     requestAnimationFrame(frame);
   }

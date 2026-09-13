@@ -9,27 +9,13 @@ export function createInitialState() {
       isRunning: false,
       health: 100,
       alive: true,
+      flashlight: false,
     },
     monsters: [
       {
         id: 'm0',
         position: { x: 55, y: 0, z: -40 },
         rotation: { yaw: Math.PI },
-        aiState: 'PATROL',
-        memory: {
-          lastHeardPosition: null,
-          lastHeardTime: 0,
-          lastHeardIntensity: 0,
-          confidence: 0,
-          suspicion: 0,
-          searchRadius: 12,
-        },
-        path: [],
-      },
-      {
-        id: 'm1',
-        position: { x: -60, y: 0, z: 50 },
-        rotation: { yaw: 0 },
         aiState: 'PATROL',
         memory: {
           lastHeardPosition: null,

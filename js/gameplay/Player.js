@@ -16,6 +16,14 @@ export class PlayerController {
     this.sensitivity = 0.0022;
     this.touchSensitivity = 0.0045;
     this._footAcc = 0;
+    this.flashlightOn = false;
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyF' && !e.repeat) {
+        this.flashlightOn = !this.flashlightOn;
+        if (this.state.data.player) this.state.data.player.flashlight = this.flashlightOn;
+      }
+    });
 
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.code);
@@ -44,6 +52,7 @@ export class PlayerController {
   update(dt) {
     const p = this.state.data.player;
     if (!p.alive) return;
+    p.flashlight = this.flashlightOn;
 
     p.isCrouching = this.keys.has('ControlLeft') || this.keys.has('KeyC');
     p.isRunning = this.keys.has('ShiftLeft') && !p.isCrouching && p.stamina > 5;

@@ -16,6 +16,7 @@ export class TouchControls {
       </div>
       <div id="touch-look-zone"></div>
       <div id="touch-actions">
+        <button type="button" id="touch-flash" aria-label="Flashlight">LIGHT</button>
         <button type="button" id="touch-crouch" aria-label="Crouch">CROUCH</button>
         <button type="button" id="touch-run" aria-label="Run">RUN</button>
       </div>
@@ -27,6 +28,8 @@ export class TouchControls {
     this.lookZone = this.el.querySelector('#touch-look-zone');
     this.btnRun = this.el.querySelector('#touch-run');
     this.btnCrouch = this.el.querySelector('#touch-crouch');
+    this.btnFlash = this.el.querySelector('#touch-flash');
+    this.onFlashToggle = null;
     this._bind();
   }
 
@@ -87,6 +90,12 @@ export class TouchControls {
     this.btnRun.addEventListener('touchstart', (e) => { prevent(e); setKey('ShiftLeft', true); this.btnRun.classList.add('active'); }, { passive: false });
     this.btnRun.addEventListener('touchend', () => { setKey('ShiftLeft', false); this.btnRun.classList.remove('active'); });
     this.btnRun.addEventListener('touchcancel', () => { setKey('ShiftLeft', false); this.btnRun.classList.remove('active'); });
+    this.btnFlash.addEventListener('touchstart', (e) => {
+      prevent(e);
+      this.btnFlash.classList.toggle('active');
+      if (typeof this.onFlashToggle === 'function') this.onFlashToggle();
+    }, { passive: false });
+
     this.btnCrouch.addEventListener('touchstart', (e) => {
       prevent(e);
       if (this.keys.has('KeyC')) { this.keys.delete('KeyC'); this.btnCrouch.classList.remove('active'); }

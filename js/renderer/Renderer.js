@@ -41,6 +41,14 @@ export class Renderer {
       180
     );
 
+    // Flashlight (toggle with F) — SpotLight parented conceptually via camera pose each frame
+    this.flashlight = new THREE.SpotLight(0xfff2d9, 0, 28, Math.PI / 7, 0.35, 1.2);
+    this.flashlight.castShadow = false;
+    this.flashlightTarget = new THREE.Object3D();
+    this.scene.add(this.flashlightTarget);
+    this.flashlight.target = this.flashlightTarget;
+    this.scene.add(this.flashlight);
+
     const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, 32, 32);
     const pos = groundGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
@@ -98,15 +106,15 @@ export class Renderer {
       this.playerTemplate = this._fallbackPlayer();
     }
 
-    // Spawn 2 monsters from template
-    for (let i = 0; i < 2; i++) {
+    // Single monster
+    {
       const m = this.monsterTemplate.clone(true);
       m.traverse((c) => {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
       this.scene.add(m);
       this.monsterMeshes.push(m);
-      this._attachNameTag(m, '???', 'monster-' + i);
+      this._attachNameTag(m, '???', 'monster-0');
     }
   }
 
@@ -277,6 +285,16 @@ export class Renderer {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = yaw;
     this.camera.rotation.x = pitch;
+
+    // Flashlight follows look direction
+    if (this.flashlight) {
+      const on = !!(state.player && state.player.flashlight);
+      this.flashlight.intensity = on ? 2.8 : 0;
+      this.flashlight.position.copy(this.camera.position);
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      this.flashlightTarget.position.copy(this.camera.position).add(dir.multiplyScalar(12));
+      this.flashlight.target.updateMatrixWorld();
+    }
 
     state.monsters.forEach((mon, i) => {
       const mesh = this.monsterMeshes[i];
