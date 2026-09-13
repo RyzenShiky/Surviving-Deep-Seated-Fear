@@ -14,7 +14,8 @@ export function createInitialState() {
     monsters: [
       {
         id: 'm0',
-        position: { x: 55, y: 0, z: -40 },
+        position: { x: 0, y: 0, z: 0 }, // filled on spawn
+        active: false,
         rotation: { yaw: Math.PI },
         aiState: 'PATROL',
         memory: {
@@ -30,7 +31,9 @@ export function createInitialState() {
     ],
     world: {
       levelId: 'forest_200',
-      timeOfDay: 0.88,
+      timeOfDay: 0.55, // 0=midnight … 0.5=noon … 1=next midnight; start late afternoon
+      timeLimit: 180, // 3 minutes
+      elapsed: 0,
       activeSoundEvents: [],
     },
     progress: {
@@ -39,6 +42,7 @@ export function createInitialState() {
       escaped: false,
       gameOver: false,
       win: false,
+      timeUp: false,
     },
     version: 3,
   };

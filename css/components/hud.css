@@ -86,3 +86,35 @@
   pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
+
+#match-timer {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: #e8e0d5;
+  text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+#match-timer.urgent {
+  color: #ff4444;
+  animation: timerBlink 0.8s ease infinite;
+}
+@keyframes timerBlink {
+  50% { opacity: 0.45; }
+}
+#phase-label {
+  position: absolute;
+  top: 2.6rem;
+  right: 1rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  color: rgba(200, 190, 180, 0.65);
+  pointer-events: none;
+}
+@media screen and (orientation: landscape) and (max-height: 420px) {
+  #match-timer { top: 0.4rem; right: 0.5rem; font-size: 1rem; }
+  #phase-label { top: 1.6rem; right: 0.5rem; }
+}

@@ -7,6 +7,7 @@ import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
 import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
+import { MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
@@ -22,7 +23,7 @@ let room = null;
 let mode = 'solo';
 let netWriteAcc = 0;
 let profile = loadProfile();
-const ESCAPE_TIME = 300;
+const ESCAPE_TIME = MATCH_SECONDS;
 let heartAcc = 0;
 let lastNearDist = Infinity;
 
@@ -110,7 +111,35 @@ function setupLocalGame(fromSave = false) {
     colliders,
     audio
   );
-  monsters = state.data.monsters.map((_, i) => new MonsterController(state, i, colliders, room));
+  // Ensure exactly 1 monster slot
+  if (!state.data.monsters.length) {
+    state.data.monsters = [{
+      id: 'm0',
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { yaw: 0 },
+      aiState: 'PATROL',
+      active: false,
+      memory: {
+        lastHeardPosition: null, lastHeardTime: 0, lastHeardIntensity: 0,
+        confidence: 0, suspicion: 0, searchRadius: 12,
+      },
+      path: [],
+    }];
+  }
+  state.data.monsters = state.data.monsters.slice(0, 1);
+  const spawn = randomMonsterSpawn(state.data.player.position);
+  const mon = state.data.monsters[0];
+  mon.position.x = spawn.x;
+  mon.position.y = 0;
+  mon.position.z = spawn.z;
+  mon.active = true;
+  mon.aiState = 'PATROL';
+  mon.memory.suspicion = 0;
+  state.data.world.elapsed = 0;
+  state.data.world.timeLimit = MATCH_SECONDS;
+  state.data.progress.timeUp = false;
+
+  monsters = [new MonsterController(state, 0, colliders, room)];
 
   // Touch controls
   if (isTouchDevice()) {
@@ -371,7 +400,7 @@ function showGameOver(win) {
   document.getElementById('gameover-screen').classList.remove('hidden');
   document.getElementById('go-title').textContent = win ? 'YOU ESCAPED' : 'YOU DIED';
   document.getElementById('go-sub').textContent = win
-    ? 'Survived the forest.'
+    ? (state?.data?.progress?.timeUp ? 'Bertahan 3 menit — kamu selamat.' : 'Survived the forest.')
     : 'The forest claimed another soul.';
   if (mode === 'solo') {
     state.saveLocal();
@@ -542,6 +571,37 @@ function startLoop() {
     const eye = player.eyePosition;
     const yaw = state.data.player.rotation.yaw;
     audio.setListenerPosition(eye.x, eye.y, eye.z, -Math.sin(yaw), -Math.cos(yaw));
+    // --- 3 min day cycle (afternoon → sunset → night) ---
+    const limit = state.data.world.timeLimit || MATCH_SECONDS;
+    state.data.world.elapsed = (state.data.world.elapsed || 0) + dt;
+    const progress = Math.min(1, state.data.world.elapsed / limit);
+    state.data.world.timeOfDay = 0.55 + progress * 0.4;
+    const lights = lightingForProgress(progress);
+    if (renderer.applyDayLighting) renderer.applyDayLighting(lights);
+    const phase = phaseFromProgress(progress);
+    const remain = Math.max(0, limit - state.data.world.elapsed);
+    const mm = Math.floor(remain / 60);
+    const ss = Math.floor(remain % 60);
+    const timerEl = document.getElementById('match-timer');
+    if (timerEl) {
+      timerEl.textContent = mm + ':' + String(ss).padStart(2, '0');
+      timerEl.classList.toggle('urgent', remain <= 30);
+    }
+    const phaseEl = document.getElementById('phase-label');
+    if (phaseEl) {
+      phaseEl.textContent =
+        phase === 'afternoon' ? 'SORE' : phase === 'sunset' ? 'SENJA' : 'MALAM';
+    }
+    // Survive full 3 minutes = win
+    if (remain <= 0 && !state.data.progress.gameOver && state.data.player.alive) {
+      state.data.progress.gameOver = true;
+      state.data.progress.win = true;
+      state.data.progress.timeUp = true;
+      state.data.progress.escaped = true;
+    }
+    // Keep max 1 monster
+    if (state.data.monsters.length > 1) state.data.monsters.length = 1;
+
     const { dist: mDist } = nearestMonsterDist(state.data.player.position, state.data.monsters);
     const { bpm, danger } = heartFromDistance(mDist);
     updateProximityUI(mDist);

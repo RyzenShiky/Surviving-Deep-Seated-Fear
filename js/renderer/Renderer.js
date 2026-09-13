@@ -27,6 +27,8 @@ export class Renderer {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, gfx.pixelRatioCap));
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     this.renderer.setClearColor(0x07080a);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
     this.renderer.shadowMap.enabled = gfx.shadows;
     if (gfx.shadows) this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -41,13 +43,15 @@ export class Renderer {
       180
     );
 
-    // Flashlight (toggle with F) — SpotLight parented conceptually via camera pose each frame
-    this.flashlight = new THREE.SpotLight(0xfff2d9, 0, 28, Math.PI / 7, 0.35, 1.2);
+    // Flashlight: strong spot + near fill (dark forest needs high intensity)
+    this.flashlight = new THREE.SpotLight(0xfff4e0, 0, 45, Math.PI / 5, 0.25, 1.0);
     this.flashlight.castShadow = false;
     this.flashlightTarget = new THREE.Object3D();
     this.scene.add(this.flashlightTarget);
     this.flashlight.target = this.flashlightTarget;
     this.scene.add(this.flashlight);
+    this.flashlightFill = new THREE.PointLight(0xffe8c8, 0, 8, 2);
+    this.scene.add(this.flashlightFill);
 
     const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, 32, 32);
     const pos = groundGeo.attributes.position;
@@ -71,11 +75,12 @@ export class Renderer {
     this.scene.add(this.treeGroup);
     this.scene.add(this.rockGroup);
 
-    this.scene.add(new THREE.AmbientLight(0x1a1c22, 0.22));
-    const moon = new THREE.DirectionalLight(0x8a9bb8, 0.35);
-    moon.position.set(40, 60, 20);
-    moon.castShadow = gfx.shadows;
-    this.scene.add(moon);
+    this.ambientLight = new THREE.AmbientLight(0x3a4038, 0.45);
+    this.scene.add(this.ambientLight);
+    this.sunLight = new THREE.DirectionalLight(0xfff0c8, 0.85);
+    this.sunLight.position.set(40, 60, 20);
+    this.sunLight.castShadow = gfx.shadows;
+    this.scene.add(this.sunLight);
 
     // Load GLB models
     const loader = new GLTFLoader();
@@ -280,6 +285,28 @@ export class Renderer {
     }
   }
 
+  applyDayLighting(light) {
+    if (!light) return;
+    if (this.ambientLight) {
+      this.ambientLight.color.setHex(light.ambient);
+      this.ambientLight.intensity = light.ambientInt;
+    }
+    if (this.sunLight) {
+      this.sunLight.color.setHex(light.sun);
+      this.sunLight.intensity = light.sunInt;
+      // sun lowers toward horizon as night approaches
+      const h = 20 + light.sunInt * 50;
+      this.sunLight.position.set(40, h, 20);
+    }
+    if (this.scene.fog) {
+      this.scene.fog.color.setHex(light.fog);
+      this.scene.fog.density = light.fogDensity;
+    }
+    this.renderer.setClearColor(light.clear);
+    if (this.scene.background) this.scene.background.setHex(light.clear);
+  }
+
+
   render(state, eye, yaw, pitch) {
     this.camera.position.set(eye.x, eye.y, eye.z);
     this.camera.rotation.order = 'YXZ';
@@ -289,11 +316,17 @@ export class Renderer {
     // Flashlight follows look direction
     if (this.flashlight) {
       const on = !!(state.player && state.player.flashlight);
-      this.flashlight.intensity = on ? 2.8 : 0;
+      // High intensity to cut through fog + dark materials
+      this.flashlight.intensity = on ? 12 : 0;
+      this.flashlight.distance = 50;
       this.flashlight.position.copy(this.camera.position);
       const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-      this.flashlightTarget.position.copy(this.camera.position).add(dir.multiplyScalar(12));
+      this.flashlightTarget.position.copy(this.camera.position).addScaledVector(dir, 18);
       this.flashlight.target.updateMatrixWorld();
+      if (this.flashlightFill) {
+        this.flashlightFill.intensity = on ? 2.5 : 0;
+        this.flashlightFill.position.copy(this.camera.position);
+      }
     }
 
     state.monsters.forEach((mon, i) => {

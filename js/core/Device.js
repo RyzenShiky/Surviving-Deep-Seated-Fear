@@ -16,6 +16,6 @@ export function recommendGraphics() {
     touch,
     pixelRatioCap: touch ? 1.25 : 1.75,
     shadows: !touch,
-    fogDensity: touch ? 0.032 : 0.028,
+    fogDensity: touch ? 0.024 : 0.022,
   };
 }
