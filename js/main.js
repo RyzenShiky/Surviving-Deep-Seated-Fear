@@ -10,7 +10,7 @@ import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
 import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid } from './net/firebase.js';
 import {
-  getAuth, signInAnonymously, GoogleAuthProvider, signInWithPopup, onAuthStateChanged,
+  getAuth, signInAnonymously, GoogleAuthProvider, signInWithRedirect, getRedirectResult,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js';
 import { getApp } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js';
 
@@ -25,6 +25,24 @@ const ESCAPE_TIME = 300;
 async function init() {
   const canvas = document.getElementById('game-canvas');
   try { initFirebase(); } catch (e) { console.warn('Firebase', e); }
+
+  // Complete Google redirect sign-in if returning from Google
+  try {
+    const auth = getAuth();
+    const cred = await getRedirectResult(auth);
+    if (cred && cred.user) {
+      profile.displayName = (cred.user.displayName || 'Player').slice(0, 16);
+      profile.uid = cred.user.uid;
+      profile.provider = 'google';
+      localStorage.setItem('longway_uid', profile.uid);
+      saveProfile(profile);
+      const nameInput = document.getElementById('profile-name');
+      if (nameInput) nameInput.value = profile.displayName;
+      enterMenu();
+    }
+  } catch (e) {
+    console.warn('getRedirectResult', e);
+  }
 
   // Profile form defaults
   const nameInput = document.getElementById('profile-name');
@@ -78,7 +96,7 @@ function setupLocalGame(fromSave = false) {
     colliders,
     audio
   );
-  monsters = state.data.monsters.map((_, i) => new MonsterController(state, i, colliders));
+  monsters = state.data.monsters.map((_, i) => new MonsterController(state, i, colliders, room));
 
   // Touch controls
   if (isTouchDevice()) {
@@ -177,19 +195,11 @@ function wireUI(canvas) {
       initFirebase();
       const auth = getAuth();
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      profile.displayName = (result.user.displayName || 'Player').slice(0, 16);
-      profile.uid = result.user.uid;
-      profile.provider = 'google';
-      localStorage.setItem('longway_uid', profile.uid);
-      saveProfile(profile);
-      document.getElementById('profile-name').value = profile.displayName;
-      enterMenu();
+      await signInWithRedirect(auth, provider);
+      // Browser navigates away; getRedirectResult in init() finishes login
     } catch (e) {
       console.error(e);
-      err.textContent = e.code === 'auth/popup-blocked'
-        ? 'Popup blocked — allow popups or use Guest'
-        : (e.message || 'Google sign-in failed. Use Guest.');
+      err.textContent = e.message || 'Google sign-in failed. Use Guest.';
     }
   });
 
@@ -375,6 +385,20 @@ function startLoop() {
         m.aiState = r.aiState;
         m.memory.suspicion = r.suspicion || 0;
       });
+
+      // Apply host-written health to local player (non-host clients)
+      if (room && !room.isHost && room.remotePlayers[room.uid]) {
+        const me = room.remotePlayers[room.uid];
+        if (typeof me.health === 'number') {
+          state.data.player.health = me.health;
+          state.data.player.alive = me.alive !== false;
+          if (!state.data.player.alive) {
+            state.data.progress.gameOver = true;
+            state.data.progress.win = false;
+          }
+        }
+      }
+
       if (room.gameStatus.gameOver) {
         state.data.progress.gameOver = true;
         state.data.progress.win = !!room.gameStatus.win;

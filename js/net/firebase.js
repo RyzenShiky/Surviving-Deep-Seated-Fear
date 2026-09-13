@@ -156,15 +156,31 @@ export class MultiplayerRoom {
 
   writePlayer(player) {
     const prev = this.remotePlayers[this.uid] || {};
+    const eyeY = player.position.y;
+    const footY = eyeY - 1.7; // Player.position.y is eye height
     return set(ref(this.db, `rooms/${this.code}/players/${this.uid}`), {
       x: player.position.x,
-      y: player.position.y,
+      y: eyeY,
+      footY,
       z: player.position.z,
       yaw: player.rotation.yaw,
       alive: player.alive !== false,
       health: player.health ?? 100,
       name: prev.name || ('Player_' + this.uid.slice(-4)),
       joinedAt: prev.joinedAt || Date.now(),
+    });
+  }
+
+  /** Host applies damage to any player uid */
+  applyDamage(uid, amount) {
+    if (!this.isHost) return Promise.resolve();
+    const prev = this.remotePlayers[uid];
+    if (!prev) return Promise.resolve();
+    const health = Math.max(0, (prev.health ?? 100) - amount);
+    const alive = health > 0;
+    return update(ref(this.db, `rooms/${this.code}/players/${uid}`), {
+      health,
+      alive,
     });
   }
 

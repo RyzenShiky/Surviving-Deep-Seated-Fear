@@ -3,15 +3,22 @@ import { pickSearchTarget } from '../ai/StateMachine.js';
 import { clampToWorld } from '../core/WorldConfig.js';
 import { resolveCollisions, groundHeight } from '../core/Collision.js';
 
-function dist(a, b) {
+function distXZ(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
 export class MonsterController {
-  constructor(state, index = 0, colliders = []) {
+  /**
+   * @param {object} state GameState
+   * @param {number} index
+   * @param {array} colliders
+   * @param {object|null} room MultiplayerRoom (host only uses for damage)
+   */
+  constructor(state, index = 0, colliders = [], room = null) {
     this.state = state;
     this.index = index;
     this.colliders = colliders;
+    this.room = room;
     this.perception = new MonsterPerception();
     this.target = null;
     this.moveSpeed = 2.4;
@@ -19,7 +26,11 @@ export class MonsterController {
     this.attackCooldown = 0;
   }
 
-  update(dt, now, playerPos = null) {
+  setRoom(room) {
+    this.room = room;
+  }
+
+  update(dt, now) {
     const m = this.state.data.monsters[this.index];
     if (!m) return;
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
@@ -27,7 +38,6 @@ export class MonsterController {
     const events = this.state.data.world.activeSoundEvents.filter((e) => now - e.timestamp < 2.5);
     this.perception.update(m, events, now, dt);
 
-    // In CHASE, prefer lastHeard or approximate toward recent sound; still no true wallhack
     switch (m.aiState) {
       case 'PATROL':
         this.widePatrol(m, dt);
@@ -38,7 +48,7 @@ export class MonsterController {
         }
         break;
       case 'SEARCH':
-        if (!this.target || dist(m.position, this.target) < 1.5) {
+        if (!this.target || distXZ(m.position, this.target) < 1.5) {
           this.target = pickSearchTarget(m.memory);
         }
         if (this.target) this.moveToward(m, this.target, dt, this.moveSpeed * 0.95);
@@ -56,28 +66,8 @@ export class MonsterController {
     m.position.z = c.z;
     m.position.y = groundHeight(m.position.x, m.position.z);
 
-    // Attack if close to player
-    const p = this.state.data.player;
-    if (p.alive && dist(m.position, p.position) < 1.6 && this.attackCooldown <= 0) {
-      if (m.aiState === 'CHASE' || m.aiState === 'INVESTIGATE' || m.memory.suspicion > 40) {
-        p.health = Math.max(0, p.health - 34);
-        this.attackCooldown = 1.2;
-        this.state.emitSound({
-          position: { ...m.position },
-          intensity: 1,
-          radius: 35,
-          type: 'impact',
-        });
-        if (p.health <= 0) {
-          p.alive = false;
-          this.state.data.progress.deaths += 1;
-          this.state.data.progress.gameOver = true;
-          this.state.data.progress.win = false;
-        }
-      }
-    }
+    this._tryAttack(m);
 
-    // HUD: max suspicion among monsters
     const ind = document.getElementById('suspicion-indicator');
     if (ind && this.index === 0) {
       let maxS = 0;
@@ -88,6 +78,70 @@ export class MonsterController {
       if (maxS >= 70) ind.classList.add('high');
       else if (maxS >= 40) ind.classList.add('mid');
       else if (maxS >= 15) ind.classList.add('low');
+    }
+  }
+
+  /**
+   * Attack any nearby player: local host player + all remote players.
+   * Host authority only writes damage via room.applyDamage.
+   */
+  _tryAttack(m) {
+    if (this.attackCooldown > 0) return;
+    const canAttack =
+      m.aiState === 'CHASE' ||
+      m.aiState === 'INVESTIGATE' ||
+      (m.memory.suspicion || 0) > 40;
+    if (!canAttack) return;
+
+    const targets = [];
+
+    // Local player (always present on host / solo)
+    const local = this.state.data.player;
+    if (local && local.alive !== false) {
+      targets.push({
+        kind: 'local',
+        uid: this.room?.uid || 'local',
+        pos: local.position,
+        apply: (dmg) => {
+          local.health = Math.max(0, local.health - dmg);
+          if (local.health <= 0) {
+            local.alive = false;
+            this.state.data.progress.deaths += 1;
+            this.state.data.progress.gameOver = true;
+            this.state.data.progress.win = false;
+          }
+        },
+      });
+    }
+
+    // Remote multiplayer players (host only)
+    if (this.room && this.room.isHost && this.room.remotePlayers) {
+      for (const [uid, rp] of Object.entries(this.room.remotePlayers)) {
+        if (uid === this.room.uid) continue; // already handled as local
+        if (rp.alive === false) continue;
+        targets.push({
+          kind: 'remote',
+          uid,
+          pos: { x: rp.x, y: rp.y, z: rp.z },
+          apply: (dmg) => {
+            this.room.applyDamage(uid, dmg);
+          },
+        });
+      }
+    }
+
+    for (const t of targets) {
+      if (distXZ(m.position, t.pos) < 1.6) {
+        t.apply(34);
+        this.attackCooldown = 1.2;
+        this.state.emitSound({
+          position: { ...m.position },
+          intensity: 1,
+          radius: 35,
+          type: 'impact',
+        });
+        break; // one target per swing
+      }
     }
   }
 

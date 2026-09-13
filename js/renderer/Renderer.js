@@ -252,7 +252,10 @@ export class Renderer {
       this._attachNameTag(mesh, data.name || 'Player', 'p-' + uid);
     }
     if (!mesh) return;
-    mesh.position.set(data.x, data.y || 0, data.z);
+    const footY = (data.footY != null)
+      ? data.footY
+      : ((data.y || 1.7) - 1.7);
+    mesh.position.set(data.x, footY, data.z);
     mesh.rotation.y = data.yaw || 0;
     mesh.visible = data.alive !== false;
     const spr = this.nameSprites.get('p-' + uid);
