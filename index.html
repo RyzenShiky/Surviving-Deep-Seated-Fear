@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>LONGWAY — Horror 3D</title>
   <link rel="stylesheet" href="./css/base/reset.css" />
   <link rel="stylesheet" href="./css/base/variables.css" />
@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="./css/components/touch.css" />
   <link rel="stylesheet" href="./css/screens/menu.css" />
   <link rel="stylesheet" href="./css/themes/horror.css" />
+  <link rel="stylesheet" href="./css/components/mobile.css" />
   <script type="importmap">
   {
     "imports": {
@@ -21,6 +22,11 @@
   </script>
 </head>
 <body class="horror-theme">
+  <div id="rotate-hint" aria-live="polite">
+    <div class="icon">📱</div>
+    <p><strong>Putar perangkat ke landscape</strong></p>
+    <p class="subtitle" style="max-width:16rem">Game ini dirancang untuk layar mendatar (HP/tablet landscape).</p>
+  </div>
   <div id="app">
     <canvas id="game-canvas" tabindex="0"></canvas>
     <div id="ui-root">

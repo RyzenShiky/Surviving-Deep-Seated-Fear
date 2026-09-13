@@ -2,6 +2,7 @@ import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
 import { buildColliders } from './core/Collision.js';
 import { isTouchDevice } from './core/Device.js';
+import { onOrientationChange, updateRotateHint, tryLandscapeLock } from './core/Orientation.js';
 import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
@@ -70,6 +71,16 @@ async function init() {
   onResize();
   clock = new Clock();
   wireUI(canvas);
+
+  onOrientationChange(() => {
+    updateRotateHint();
+    if (touch && touch.active) touch._syncLayout();
+    if (renderer) {
+      const canvas = document.getElementById('game-canvas');
+      if (canvas) renderer.resize(canvas.clientWidth, canvas.clientHeight);
+    }
+  });
+  updateRotateHint();
 
   // If already guest profile saved, skip login optional — still show login first
 }
@@ -418,9 +429,11 @@ function tickHeartbeat(dt, bpm, danger) {
   }
 }
 
+
 function startLoop() {
   if (running) return;
   running = true;
+  tryLandscapeLock();
   function frame() {
     if (!running) return;
     const dt = clock.tick();
