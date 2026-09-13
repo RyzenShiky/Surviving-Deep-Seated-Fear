@@ -1,0 +1,59 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "rooms": {
+      "$roomCode": {
+        ".read": true,
+
+        "meta": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['hostUid', 'createdAt']) || newData.hasChild('hostUid') || newData.hasChild('started')"
+        },
+
+        "players": {
+          "$uid": {
+            ".write": true,
+            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'alive', 'health']) && newData.child('x').isNumber() && newData.child('z').isNumber() && newData.child('health').isNumber() && newData.child('health').val() >= 0 && newData.child('health').val() <= 100"
+          }
+        },
+
+        "monster": {
+          ".write": true,
+          "$mid": {
+            ".validate": "newData.hasChildren(['x', 'y', 'z', 'yaw', 'aiState']) && newData.child('x').isNumber() && newData.child('z').isNumber()"
+          }
+        },
+
+        "soundEvents": {
+          ".write": true,
+          "$sid": {
+            ".validate": "newData.hasChildren(['x', 'z', 'intensity', 'radius', 'type', 't']) && newData.child('intensity').isNumber() && newData.child('radius').isNumber()"
+          }
+        },
+
+        "game": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['gameOver', 'win'])"
+        }
+      }
+    },
+
+    "saves": {
+      "$deviceId": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['data', 'updatedAt', 'version']) && newData.child('data').isString() && newData.child('data').val().length < 500000 && newData.child('updatedAt').isNumber() && newData.child('version').isNumber()"
+      }
+    },
+
+    "leaderboard": {
+      ".read": true,
+      "$entryId": {
+        ".write": "!data.exists() && newData.hasChildren(['name', 'playTime', 'deaths', 'timestamp'])",
+        ".validate": "newData.child('name').isString() && newData.child('name').val().length <= 24 && newData.child('playTime').isNumber() && newData.child('deaths').isNumber() && newData.child('timestamp').isNumber()"
+      }
+    }
+  }
+}

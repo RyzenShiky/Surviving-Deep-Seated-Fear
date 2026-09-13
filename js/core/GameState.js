@@ -1,0 +1,115 @@
+export function createInitialState() {
+  return {
+    player: {
+      position: { x: 0, y: 1.7, z: 8 },
+      rotation: { yaw: 0, pitch: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      stamina: 100,
+      isCrouching: false,
+      isRunning: false,
+      health: 100,
+      alive: true,
+    },
+    monsters: [
+      {
+        id: 'm0',
+        position: { x: 55, y: 0, z: -40 },
+        rotation: { yaw: Math.PI },
+        aiState: 'PATROL',
+        memory: {
+          lastHeardPosition: null,
+          lastHeardTime: 0,
+          lastHeardIntensity: 0,
+          confidence: 0,
+          suspicion: 0,
+          searchRadius: 12,
+        },
+        path: [],
+      },
+      {
+        id: 'm1',
+        position: { x: -60, y: 0, z: 50 },
+        rotation: { yaw: 0 },
+        aiState: 'PATROL',
+        memory: {
+          lastHeardPosition: null,
+          lastHeardTime: 0,
+          lastHeardIntensity: 0,
+          confidence: 0,
+          suspicion: 0,
+          searchRadius: 12,
+        },
+        path: [],
+      },
+    ],
+    world: {
+      levelId: 'forest_200',
+      timeOfDay: 0.88,
+      activeSoundEvents: [],
+    },
+    progress: {
+      playTime: 0,
+      deaths: 0,
+      escaped: false,
+      gameOver: false,
+      win: false,
+    },
+    version: 3,
+  };
+}
+
+const SAVE_KEY = 'longway_save_v3';
+
+export class GameState {
+  constructor(initial) {
+    this.data = initial || createInitialState();
+  }
+
+  serialize() {
+    return JSON.stringify(this.data);
+  }
+
+  static deserialize(json) {
+    return new GameState(JSON.parse(json));
+  }
+
+  saveLocal() {
+    try {
+      localStorage.setItem(SAVE_KEY, this.serialize());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  static loadLocal() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      return GameState.deserialize(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  static hasSave() {
+    return !!localStorage.getItem(SAVE_KEY);
+  }
+
+  static clearSave() {
+    localStorage.removeItem(SAVE_KEY);
+  }
+
+  emitSound(ev) {
+    const full = {
+      ...ev,
+      id: `snd_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: performance.now() / 1000,
+    };
+    this.data.world.activeSoundEvents.push(full);
+    if (this.data.world.activeSoundEvents.length > 64) {
+      this.data.world.activeSoundEvents.shift();
+    }
+    return full;
+  }
+}

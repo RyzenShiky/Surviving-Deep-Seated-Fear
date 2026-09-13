@@ -1,0 +1,65 @@
+export class AudioManager {
+  constructor() {
+    this.ctx = null;
+    this.master = null;
+    this.sfx = null;
+  }
+
+  async init() {
+    this.ctx = new AudioContext();
+    this.master = this.ctx.createGain();
+    this.sfx = this.ctx.createGain();
+    this.sfx.connect(this.master);
+    this.master.connect(this.ctx.destination);
+    this.master.gain.value = 0.8;
+    this.sfx.gain.value = 1;
+  }
+
+  resume() {
+    return this.ctx?.resume();
+  }
+
+  setMasterVolume(v) {
+    if (this.master) this.master.gain.value = v;
+  }
+  setSfxVolume(v) {
+    if (this.sfx) this.sfx.gain.value = v;
+  }
+
+  setListenerPosition(x, y, z, fx = 0, fz = -1) {
+    if (!this.ctx?.listener?.positionX) return;
+    const l = this.ctx.listener;
+    const t = this.ctx.currentTime;
+    l.positionX.setValueAtTime(x, t);
+    l.positionY.setValueAtTime(y, t);
+    l.positionZ.setValueAtTime(z, t);
+    l.forwardX.setValueAtTime(fx, t);
+    l.forwardY.setValueAtTime(0, t);
+    l.forwardZ.setValueAtTime(fz, t);
+    l.upY.setValueAtTime(1, t);
+  }
+
+  playFootstep(x, y, z, intensity = 1) {
+    if (!this.ctx || !this.sfx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const panner = this.ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 1;
+    panner.maxDistance = 50;
+    panner.rolloffFactor = 1.2;
+    osc.type = 'triangle';
+    osc.frequency.value = 80 + Math.random() * 40;
+    gain.gain.setValueAtTime(0.12 * intensity, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+    panner.positionX.value = x;
+    panner.positionY.value = y;
+    panner.positionZ.value = z;
+    osc.connect(gain);
+    gain.connect(panner);
+    panner.connect(this.sfx);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.13);
+  }
+}
