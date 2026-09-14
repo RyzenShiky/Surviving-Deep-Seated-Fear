@@ -24,9 +24,12 @@ export class TouchControls {
       </div>
       <div id="touch-look-zone"></div>
       <div id="touch-actions">
+        <button type="button" id="touch-hide" aria-label="Hide">HIDE</button>
+        <button type="button" id="touch-throw" aria-label="Throw">THROW</button>
         <button type="button" id="touch-flash" aria-label="Flashlight">LIGHT</button>
         <button type="button" id="touch-crouch" aria-label="Crouch">CROUCH</button>
         <button type="button" id="touch-run" aria-label="Run">RUN</button>
+        <button type="button" id="touch-revive" aria-label="Revive">E</button>
       </div>
     `;
     rootEl.appendChild(this.el);
@@ -38,6 +41,11 @@ export class TouchControls {
     this.btnRun = this.el.querySelector('#touch-run');
     this.btnCrouch = this.el.querySelector('#touch-crouch');
     this.btnFlash = this.el.querySelector('#touch-flash');
+    this.btnHide = this.el.querySelector('#touch-hide');
+    this.btnThrow = this.el.querySelector('#touch-throw');
+    this.btnRevive = this.el.querySelector('#touch-revive');
+    this.onHide = null;
+    this.onThrowBtn = null;
 
     this._onStart = this._onStart.bind(this);
     this._onMove = this._onMove.bind(this);
@@ -117,6 +125,23 @@ export class TouchControls {
       { passive: false }
     );
 
+    this.btnHide.addEventListener('touchstart', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (this.onHide) this.onHide();
+    }, { passive: false });
+    this.btnThrow.addEventListener('touchstart', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (this.onThrowBtn) this.onThrowBtn();
+    }, { passive: false });
+    this.btnRevive.addEventListener('touchstart', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      this.keys.add('KeyE');
+      this.btnRevive.classList.add('active');
+    }, { passive: false });
+    this.btnRevive.addEventListener('touchend', () => {
+      this.keys.delete('KeyE');
+      this.btnRevive.classList.remove('active');
+    });
     this.btnFlash.addEventListener(
       'touchstart',
       (e) => {

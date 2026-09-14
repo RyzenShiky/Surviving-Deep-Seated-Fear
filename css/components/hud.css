@@ -118,3 +118,38 @@
   #match-timer { top: 0.4rem; right: 0.5rem; font-size: 1rem; }
   #phase-label { top: 1.6rem; right: 0.5rem; }
 }
+
+#location-hint {
+  position: absolute;
+  bottom: 5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.75rem;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.15);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #c8c0b4;
+  pointer-events: none;
+}
+
+#weather-label {
+  position: absolute; top: 4rem; right: 1rem;
+  font-size: 0.7rem; letter-spacing: 0.15em; color: #8ab4d4;
+  pointer-events: none;
+}
+#revive-bar {
+  position: absolute; bottom: 6rem; left: 50%; transform: translateX(-50%);
+  padding: 0.35rem 0.9rem; background: rgba(0,40,0,0.55);
+  border: 1px solid #4a7c59; font-size: 13px; color: #cfe;
+  pointer-events: none;
+}
+#status-pills {
+  position: absolute; bottom: 4.5rem; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 0.4rem; pointer-events: none;
+}
+.pill {
+  font-size: 10px; letter-spacing: 0.1em; padding: 0.15rem 0.45rem;
+  background: rgba(0,0,0,0.5); border: 1px solid #555; color: #ccc;
+}
+.pill.hidden { display: none; }

@@ -65,6 +65,41 @@ export class AudioManager {
   }
 
   /** Soft heartbeat thud — rate/volume controlled by caller */
+  setRain(on) {
+    if (!this.ctx || !this.sfx) return;
+    if (on && !this._rainNodes) {
+      const bufSize = this.ctx.sampleRate * 2;
+      const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 900;
+      bp.Q.value = 0.7;
+      const g = this.ctx.createGain();
+      g.gain.value = 0.0001;
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.sfx);
+      src.start();
+      this._rainNodes = { src, g };
+      g.gain.linearRampToValueAtTime(0.12, this.ctx.currentTime + 1);
+    } else if (!on && this._rainNodes) {
+      const g = this._rainNodes.g;
+      g.gain.cancelScheduledValues(this.ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.0001, this.ctx.currentTime + 1);
+      const nodes = this._rainNodes;
+      this._rainNodes = null;
+      setTimeout(() => {
+        try { nodes.src.stop(); } catch {}
+      }, 1200);
+    }
+    // already on/off: no-op (avoid gain spam every frame)
+  }
+
   playHeartbeat(volume = 0.2) {
     if (!this.ctx || !this.sfx || volume <= 0.01) return;
     const t0 = this.ctx.currentTime;

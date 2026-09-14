@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
 import { WORLD, tileSeed } from '../core/WorldConfig.js';
+import { BUILDING_DEFS, nearBuilding } from '../core/Buildings.js';
 import { recommendGraphics } from '../core/Device.js';
 
 export class Renderer {
@@ -12,6 +14,12 @@ export class Renderer {
     this.playerTemplate = null;
     this.nameSprites = new Map(); // key -> sprite
     this.remoteMeshes = {};
+    this.monsterAnimations = [];
+    this.playerAnimations = [];
+    this.mixers = [];
+    this.throwables = [];
+    this.rainMesh = null;
+    this._rainOn = false;
   }
 
   async init(canvas) {
@@ -40,7 +48,7 @@ export class Renderer {
       72,
       canvas.clientWidth / canvas.clientHeight,
       0.15,
-      180
+      320
     );
 
     // Flashlight: strong spot + near fill (dark forest needs high intensity)
@@ -53,7 +61,7 @@ export class Renderer {
     this.flashlightFill = new THREE.PointLight(0xffe8c8, 0, 8, 2);
     this.scene.add(this.flashlightFill);
 
-    const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, 32, 32);
+    const groundGeo = new THREE.PlaneGeometry(WORLD.size, WORLD.size, 48, 48);
     const pos = groundGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -74,6 +82,9 @@ export class Renderer {
     this.buildForest();
     this.scene.add(this.treeGroup);
     this.scene.add(this.rockGroup);
+    this.buildingGroup = new THREE.Group();
+    this.buildBuildings();
+    this.scene.add(this.buildingGroup);
 
     this.ambientLight = new THREE.AmbientLight(0x3a4038, 0.45);
     this.scene.add(this.ambientLight);
@@ -87,6 +98,7 @@ export class Renderer {
     try {
       const monGltf = await loader.loadAsync('./assets/monster.glb');
       this.monsterTemplate = monGltf.scene;
+      this.monsterAnimations = monGltf.animations || [];
       this.monsterTemplate.traverse((c) => {
         if (c.isMesh) {
           c.castShadow = gfx.shadows;
@@ -100,6 +112,7 @@ export class Renderer {
     try {
       const plGltf = await loader.loadAsync('./assets/player.glb');
       this.playerTemplate = plGltf.scene;
+      this.playerAnimations = plGltf.animations || [];
       this.playerTemplate.traverse((c) => {
         if (c.isMesh) {
           c.castShadow = gfx.shadows;
@@ -111,15 +124,15 @@ export class Renderer {
       this.playerTemplate = this._fallbackPlayer();
     }
 
-    // Single monster
-    {
-      const m = this.monsterTemplate.clone(true);
+    for (let i = 0; i < 2; i++) {
+      const m = SkeletonUtils.clone(this.monsterTemplate);
       m.traverse((c) => {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
       this.scene.add(m);
+      m.userData.anim = this._setupAnimated(m, this.monsterAnimations, 'Patrol');
       this.monsterMeshes.push(m);
-      this._attachNameTag(m, '???', 'monster-0');
+      this._attachNameTag(m, '???', 'monster-' + i);
     }
   }
 
@@ -192,57 +205,327 @@ export class Renderer {
     spr.userData.tex.needsUpdate = true;
   }
 
+
+
+  spawnThrowable(from, to) {
+    const geo = new THREE.SphereGeometry(0.12, 8, 8);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xc4a574, roughness: 0.7 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(from.x, from.y, from.z);
+    this.scene.add(mesh);
+    this.throwables.push({
+      mesh,
+      from: { ...from },
+      to: { ...to },
+      t: 0,
+      dur: 0.45,
+    });
+  }
+
+  _updateThrowables(dt) {
+    for (let i = this.throwables.length - 1; i >= 0; i--) {
+      const th = this.throwables[i];
+      th.t += dt;
+      const u = Math.min(1, th.t / th.dur);
+      const x = th.from.x + (th.to.x - th.from.x) * u;
+      const z = th.from.z + (th.to.z - th.from.z) * u;
+      const y = th.from.y + (th.to.y - th.from.y) * u + Math.sin(u * Math.PI) * 2.2;
+      th.mesh.position.set(x, y, z);
+      if (u >= 1) {
+        this.scene.remove(th.mesh);
+        th.mesh.geometry.dispose();
+        th.mesh.material.dispose();
+        this.throwables.splice(i, 1);
+      }
+    }
+  }
+
+  setRain(on) {
+    on = !!on;
+    if (on === this._rainOn && this.rainMesh) {
+      this.rainMesh.visible = on;
+      return;
+    }
+    this._rainOn = on;
+    if (on && !this.rainMesh) {
+      // Fewer drops on weak devices; streaks via sizeAttenuation
+      const n = this.gfx.touch ? 120 : 280;
+      const positions = new Float32Array(n * 3);
+      const speeds = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        positions[i * 3] = (Math.random() - 0.5) * 36;
+        positions[i * 3 + 1] = Math.random() * 22;
+        positions[i * 3 + 2] = (Math.random() - 0.5) * 36;
+        speeds[i] = 14 + Math.random() * 10;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({
+        color: 0xb8d4ef,
+        size: this.gfx.touch ? 0.12 : 0.09,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+        sizeAttenuation: true,
+      });
+      this.rainMesh = new THREE.Points(geo, mat);
+      this.rainMesh.frustumCulled = false;
+      this._rainSpeeds = speeds;
+      this._rainPosArr = positions;
+      this._rainCount = n;
+      this._rainFrame = 0;
+      this.scene.add(this.rainMesh);
+    }
+    if (this.rainMesh) this.rainMesh.visible = on;
+  }
+
+  _updateRain(dt, camPos) {
+    if (!this.rainMesh || !this._rainOn || !this._rainPosArr) return;
+    // Follow camera (cheap)
+    this.rainMesh.position.set(camPos.x, camPos.y - 2, camPos.z);
+    // Update only half the drops per frame (interleaved) — ~2× cheaper
+    this._rainFrame = (this._rainFrame + 1) % 2;
+    const arr = this._rainPosArr;
+    const speeds = this._rainSpeeds;
+    const n = this._rainCount;
+    const fall = dt;
+    for (let i = this._rainFrame; i < n; i += 2) {
+      const yi = i * 3 + 1;
+      arr[yi] -= speeds[i] * fall;
+      if (arr[yi] < -2) {
+        arr[yi] = 18 + Math.random() * 6;
+        arr[i * 3] = (Math.random() - 0.5) * 36;
+        arr[i * 3 + 2] = (Math.random() - 0.5) * 36;
+      }
+    }
+    this.rainMesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+  _setupAnimated(mesh, clips, defaultClip) {
+    if (!clips || !clips.length) return null;
+    const mixer = new THREE.AnimationMixer(mesh);
+    const actions = {};
+    for (const clip of clips) {
+      if (clip && clip.name) actions[clip.name] = mixer.clipAction(clip);
+    }
+    this.mixers.push(mixer);
+    const entry = { mixer, actions, current: null };
+    if (defaultClip && actions[defaultClip]) {
+      actions[defaultClip].play();
+      entry.current = defaultClip;
+    } else {
+      // fallback first clip
+      const first = Object.keys(actions)[0];
+      if (first) {
+        actions[first].play();
+        entry.current = first;
+      }
+    }
+    return entry;
+  }
+
+  _playAction(entry, name, loopOnce = false) {
+    if (!entry || !entry.actions) return;
+    // fuzzy match clip names (Idle/idle/IDLE)
+    let key = name;
+    if (!entry.actions[key]) {
+      const lower = name.toLowerCase();
+      key = Object.keys(entry.actions).find((k) => k.toLowerCase() === lower || k.toLowerCase().includes(lower));
+    }
+    if (!key || !entry.actions[key] || entry.current === key) return;
+    const next = entry.actions[key];
+    const prev = entry.current ? entry.actions[entry.current] : null;
+    next.reset();
+    if (loopOnce) {
+      next.setLoop(THREE.LoopOnce, 1);
+      next.clampWhenFinished = true;
+    } else {
+      next.setLoop(THREE.LoopRepeat, Infinity);
+    }
+    next.fadeIn(0.25).play();
+    if (prev && prev !== next) prev.fadeOut(0.25);
+    entry.current = key;
+  }
+
+  buildBuildings() {
+    const doorW = 1.7;
+    const wallT = 0.35;
+    for (const def of BUILDING_DEFS) {
+      const g = new THREE.Group();
+      g.position.set(def.x, 0, def.z);
+      const mat = new THREE.MeshStandardMaterial({
+        color: def.color,
+        roughness: 0.92,
+        metalness: 0.05,
+      });
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: def.type === 'building' ? 0x1a1c20 : 0x1a1008,
+        roughness: 0.88,
+      });
+      const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1814,
+        roughness: 0.95,
+      });
+      const { w, d, h, door } = def;
+      const hx = w / 2;
+      const hz = d / 2;
+
+      // Floor
+      const floor = new THREE.Mesh(new THREE.BoxGeometry(w - 0.1, 0.12, d - 0.1), floorMat);
+      floor.position.y = 0.06;
+      floor.receiveShadow = true;
+      g.add(floor);
+
+      // Helper: wall panel
+      const addWall = (ww, hh, dd, px, py, pz) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(ww, hh, dd), mat);
+        m.position.set(px, py, pz);
+        m.castShadow = this.gfx.shadows;
+        m.receiveShadow = true;
+        g.add(m);
+      };
+
+      // North (-Z)
+      if (door === 'n') {
+        const side = (w - doorW) / 2;
+        addWall(side, h, wallT, -hx + side / 2, h / 2, -hz);
+        addWall(side, h, wallT, hx - side / 2, h / 2, -hz);
+      } else {
+        addWall(w + wallT, h, wallT, 0, h / 2, -hz);
+      }
+      // South (+Z)
+      if (door === 's') {
+        const side = (w - doorW) / 2;
+        addWall(side, h, wallT, -hx + side / 2, h / 2, hz);
+        addWall(side, h, wallT, hx - side / 2, h / 2, hz);
+      } else {
+        addWall(w + wallT, h, wallT, 0, h / 2, hz);
+      }
+      // West (-X)
+      if (door === 'w') {
+        const side = (d - doorW) / 2;
+        addWall(wallT, h, side, -hx, h / 2, -hz + side / 2);
+        addWall(wallT, h, side, -hx, h / 2, hz - side / 2);
+      } else {
+        addWall(wallT, h, d + wallT, -hx, h / 2, 0);
+      }
+      // East (+X)
+      if (door === 'e') {
+        const side = (d - doorW) / 2;
+        addWall(wallT, h, side, hx, h / 2, -hz + side / 2);
+        addWall(wallT, h, side, hx, h / 2, hz - side / 2);
+      } else {
+        addWall(wallT, h, d + wallT, hx, h / 2, 0);
+      }
+
+      // Roof
+      if (def.type === 'house') {
+        const roof = new THREE.Mesh(
+          new THREE.ConeGeometry(Math.max(w, d) * 0.72, h * 0.55, 4),
+          roofMat
+        );
+        roof.position.y = h + h * 0.2;
+        roof.rotation.y = Math.PI / 4;
+        roof.castShadow = this.gfx.shadows;
+        g.add(roof);
+      } else {
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.25, d + 0.6), roofMat);
+        roof.position.y = h + 0.1;
+        roof.castShadow = this.gfx.shadows;
+        g.add(roof);
+      }
+
+      // Dim interior bulb
+      const bulb = new THREE.PointLight(0xffcc88, 0.35, Math.max(w, d) * 1.2, 2);
+      bulb.position.set(0, h * 0.7, 0);
+      g.add(bulb);
+
+      this.buildingGroup.add(g);
+    }
+  }
+
+
   buildForest() {
+    const treeColliders = (this._treeData = []);
+    const rockColliders = (this._rockData = []);
+    // Collect positions using same logic as Collision (approx from colliders passed later)
+    // Build from WORLD tiles here
+    const half = WORLD.half;
+    const ts = WORLD.tileSize;
+    const dummy = new THREE.Object3D();
     const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 5.5, 5);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a1c12, roughness: 0.95 });
     const crownGeo = new THREE.ConeGeometry(1.6, 4.2, 6);
     const crownMat = new THREE.MeshStandardMaterial({ color: 0x0f1a0c, roughness: 0.9 });
     const rockGeo = new THREE.DodecahedronGeometry(1, 0);
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x3a3a36, roughness: 0.88 });
-    const half = WORLD.half;
-    const ts = WORLD.tileSize;
-    const shadows = this.gfx.shadows;
+
+    const trunks = [];
+    const crowns = [];
+    const rocks = [];
 
     for (let tz = 0; tz < WORLD.tilesPerSide; tz++) {
       for (let tx = 0; tx < WORLD.tilesPerSide; tx++) {
         const ox = -half + tx * ts + ts * 0.5;
         const oz = -half + tz * ts + ts * 0.5;
-        const treeCount = 9 + Math.floor(tileSeed(tx, tz, 0) * 6);
+        const treeCount = 6 + Math.floor(tileSeed(tx, tz, 0) * 5);
         for (let i = 0; i < treeCount; i++) {
           const sx = tileSeed(tx, tz, i * 3 + 1);
           const sz = tileSeed(tx, tz, i * 3 + 2);
           const scale = 0.7 + tileSeed(tx, tz, i * 3 + 3) * 0.9;
           const x = ox + (sx - 0.5) * (ts - 2);
           const z = oz + (sz - 0.5) * (ts - 2);
-          if (Math.hypot(x, z) < 6) continue;
-          const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-          trunk.position.set(x, 2.75 * scale, z);
-          trunk.scale.setScalar(scale);
-          trunk.castShadow = shadows;
-          this.treeGroup.add(trunk);
-          const crown = new THREE.Mesh(crownGeo, crownMat);
-          crown.position.set(x, 5.2 * scale, z);
-          crown.scale.setScalar(scale);
-          crown.castShadow = shadows;
-          this.treeGroup.add(crown);
+          if (Math.hypot(x, z) < 8) continue;
+          if (nearBuilding(x, z, 9)) continue;
+          trunks.push({ x, z, scale });
+          crowns.push({ x, z, scale });
         }
-        const rockCount = 1 + Math.floor(tileSeed(tx, tz, 99) * 3);
+        const rockCount = 1 + Math.floor(tileSeed(tx, tz, 99) * 2);
         for (let i = 0; i < rockCount; i++) {
           const sx = tileSeed(tx, tz, 200 + i * 2);
           const sz = tileSeed(tx, tz, 201 + i * 2);
           const x = ox + (sx - 0.5) * (ts - 3);
           const z = oz + (sz - 0.5) * (ts - 3);
-          if (Math.hypot(x, z) < 5) continue;
-          const rock = new THREE.Mesh(rockGeo, rockMat);
+          if (Math.hypot(x, z) < 6) continue;
+          if (nearBuilding(x, z, 7)) continue;
           const sc = 0.6 + tileSeed(tx, tz, 300 + i) * 1.4;
-          rock.position.set(x, 0.4 * sc, z);
-          rock.scale.setScalar(sc);
-          rock.rotation.set(sx * 2, sz * 3, sx);
-          rock.castShadow = shadows;
-          this.rockGroup.add(rock);
+          rocks.push({ x, z, scale: sc, rot: sx * 2 });
         }
       }
     }
+
+    const trunkIM = new THREE.InstancedMesh(trunkGeo, trunkMat, trunks.length);
+    const crownIM = new THREE.InstancedMesh(crownGeo, crownMat, crowns.length);
+    trunkIM.castShadow = this.gfx.shadows;
+    crownIM.castShadow = this.gfx.shadows;
+    trunks.forEach((t, i) => {
+      dummy.position.set(t.x, 2.75 * t.scale, t.z);
+      dummy.scale.setScalar(t.scale);
+      dummy.updateMatrix();
+      trunkIM.setMatrixAt(i, dummy.matrix);
+    });
+    crowns.forEach((t, i) => {
+      dummy.position.set(t.x, 5.2 * t.scale, t.z);
+      dummy.scale.setScalar(t.scale);
+      dummy.updateMatrix();
+      crownIM.setMatrixAt(i, dummy.matrix);
+    });
+    trunkIM.instanceMatrix.needsUpdate = true;
+    crownIM.instanceMatrix.needsUpdate = true;
+    this.treeGroup.add(trunkIM);
+    this.treeGroup.add(crownIM);
+
+    const rockIM = new THREE.InstancedMesh(rockGeo, rockMat, rocks.length);
+    rockIM.castShadow = this.gfx.shadows;
+    rocks.forEach((r, i) => {
+      dummy.position.set(r.x, 0.4 * r.scale, r.z);
+      dummy.scale.setScalar(r.scale);
+      dummy.rotation.set(r.rot, r.rot * 1.5, 0);
+      dummy.updateMatrix();
+      rockIM.setMatrixAt(i, dummy.matrix);
+    });
+    rockIM.instanceMatrix.needsUpdate = true;
+    this.rockGroup.add(rockIM);
   }
 
   resize(w, h) {
@@ -256,11 +539,12 @@ export class Renderer {
     if (uid === myUid) return;
     let mesh = this.remoteMeshes[uid];
     if (!mesh && this.playerTemplate) {
-      mesh = this.playerTemplate.clone(true);
+      mesh = SkeletonUtils.clone(this.playerTemplate);
       mesh.traverse((c) => {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
       this.scene.add(mesh);
+      mesh.userData.anim = this._setupAnimated(mesh, this.playerAnimations, 'Idle');
       this.remoteMeshes[uid] = mesh;
       this._attachNameTag(mesh, data.name || 'Player', 'p-' + uid);
     }
@@ -271,6 +555,11 @@ export class Renderer {
     mesh.position.set(data.x, footY, data.z);
     mesh.rotation.y = data.yaw || 0;
     mesh.visible = data.alive !== false;
+    if (mesh.userData.anim) {
+      const clip =
+        data.moveState === 'run' ? 'Run' : data.moveState === 'walk' ? 'Walk' : 'Idle';
+      this._playAction(mesh.userData.anim, clip);
+    }
     const spr = this.nameSprites.get('p-' + uid);
     if (spr) this._updateNameSprite(spr, data.name || 'Player');
   }
@@ -278,7 +567,12 @@ export class Renderer {
   pruneRemotePlayers(activeUids) {
     for (const uid of Object.keys(this.remoteMeshes)) {
       if (!activeUids.has(uid)) {
-        this.scene.remove(this.remoteMeshes[uid]);
+        const mesh = this.remoteMeshes[uid];
+        if (mesh.userData.anim) {
+          const idx = this.mixers.indexOf(mesh.userData.anim.mixer);
+          if (idx !== -1) this.mixers.splice(idx, 1);
+        }
+        this.scene.remove(mesh);
         this.nameSprites.delete('p-' + uid);
         delete this.remoteMeshes[uid];
       }
@@ -287,27 +581,44 @@ export class Renderer {
 
   applyDayLighting(light) {
     if (!light) return;
+    // Skip if same key already applied (progress quantized)
+    const key = light._key || 0;
+    if (key && key === this._lastLightKey && this._lastRainLit === this._rainOn) return;
+    this._lastLightKey = key;
+    this._lastRainLit = this._rainOn;
+
+    const rainDim = this._rainOn ? 0.72 : 1;
     if (this.ambientLight) {
       this.ambientLight.color.setHex(light.ambient);
-      this.ambientLight.intensity = light.ambientInt;
+      this.ambientLight.intensity = light.ambientInt * rainDim;
     }
     if (this.sunLight) {
       this.sunLight.color.setHex(light.sun);
-      this.sunLight.intensity = light.sunInt;
-      // sun lowers toward horizon as night approaches
-      const h = 20 + light.sunInt * 50;
-      this.sunLight.position.set(40, h, 20);
+      this.sunLight.intensity = light.sunInt * rainDim;
+      const h = 18 + light.sunInt * 52;
+      this.sunLight.position.set(45, h, 25);
+      // Cooler directional fill at night
+      if (light.sunInt < 0.25) {
+        this.sunLight.color.offsetHSL(0.05, -0.1, 0);
+      }
     }
     if (this.scene.fog) {
       this.scene.fog.color.setHex(light.fog);
-      this.scene.fog.density = light.fogDensity;
+      // Rain: denser fog but clamped so flashlight still readable
+      const dens = light.fogDensity * (this._rainOn ? 1.35 : 1);
+      this.scene.fog.density = Math.min(0.045, dens);
     }
     this.renderer.setClearColor(light.clear);
-    if (this.scene.background) this.scene.background.setHex(light.clear);
+    if (this.scene.background && this.scene.background.isColor) {
+      this.scene.background.setHex(light.clear);
+    }
   }
 
 
-  render(state, eye, yaw, pitch) {
+  render(state, eye, yaw, pitch, dt = 0) {
+    for (const mixer of this.mixers) mixer.update(dt || 0);
+    this._updateThrowables(dt || 0);
+
     this.camera.position.set(eye.x, eye.y, eye.z);
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = yaw;
@@ -317,7 +628,7 @@ export class Renderer {
     if (this.flashlight) {
       const on = !!(state.player && state.player.flashlight);
       // High intensity to cut through fog + dark materials
-      this.flashlight.intensity = on ? 12 : 0;
+      this.flashlight.intensity = on ? (this._rainOn ? 14 : 11) : 0;
       this.flashlight.distance = 50;
       this.flashlight.position.copy(this.camera.position);
       const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
@@ -334,11 +645,18 @@ export class Renderer {
       if (!mesh) return;
       mesh.position.set(mon.position.x, mon.position.y || 0, mon.position.z);
       mesh.rotation.y = mon.rotation.yaw;
+      if (mesh.userData.anim) {
+        if ((mon.attackCooldown || 0) > 0.9) this._playAction(mesh.userData.anim, 'Attack', true);
+        else if (mon.aiState === 'CHASE') this._playAction(mesh.userData.anim, 'Chase');
+        else if (mon.aiState === 'INVESTIGATE' || mon.aiState === 'SEARCH') this._playAction(mesh.userData.anim, 'Chase');
+        else this._playAction(mesh.userData.anim, 'Patrol');
+      }
       const label = mon.aiState === 'CHASE' ? '!!!' : mon.aiState === 'PATROL' ? '…' : '?';
       const spr = this.nameSprites.get('monster-' + i);
       if (spr) this._updateNameSprite(spr, label);
     });
 
+    this._updateRain(dt || 0, this.camera.position);
     this.renderer.render(this.scene, this.camera);
   }
 }

@@ -10,6 +10,13 @@ export function createInitialState() {
       health: 100,
       alive: true,
       flashlight: false,
+      isHiding: false,
+      isHoldingBreath: false,
+      breath: 100,
+      throwables: 2,
+      moveState: 'idle',
+      isDowned: false,
+      downedTimer: 0,
     },
     monsters: [
       {
@@ -31,7 +38,10 @@ export function createInitialState() {
     ],
     world: {
       levelId: 'forest_200',
-      timeOfDay: 0.55, // 0=midnight … 0.5=noon … 1=next midnight; start late afternoon
+      timeOfDay: 0.55,
+      weather: 'clear',
+      weatherTimer: 0,
+      weatherNextChange: 50, // 0=midnight … 0.5=noon … 1=next midnight; start late afternoon
       timeLimit: 180, // 3 minutes
       elapsed: 0,
       activeSoundEvents: [],

@@ -166,6 +166,9 @@ export class MultiplayerRoom {
       yaw: player.rotation.yaw,
       alive: player.alive !== false,
       health: player.health ?? 100,
+      moveState: player.moveState || 'idle',
+      isDowned: !!player.isDowned,
+      downedTimer: player.downedTimer || 0,
       name: prev.name || ('Player_' + this.uid.slice(-4)),
       joinedAt: prev.joinedAt || Date.now(),
     });
@@ -176,11 +179,22 @@ export class MultiplayerRoom {
     if (!this.isHost) return Promise.resolve();
     const prev = this.remotePlayers[uid];
     if (!prev) return Promise.resolve();
-    const health = Math.max(0, (prev.health ?? 100) - amount);
-    const alive = health > 0;
+    let health = (prev.health ?? 100) - amount;
+    let isDowned = !!prev.isDowned;
+    let alive = true;
+    if (isDowned) {
+      alive = false;
+      isDowned = false;
+      health = 0;
+    } else if (health <= 0) {
+      health = 0;
+      isDowned = true;
+    }
     return update(ref(this.db, `rooms/${this.code}/players/${uid}`), {
       health,
       alive,
+      isDowned,
+      downedTimer: isDowned ? 45 : 0,
     });
   }
 
@@ -195,6 +209,7 @@ export class MultiplayerRoom {
         yaw: m.rotation.yaw,
         aiState: m.aiState,
         suspicion: m.memory?.suspicion || 0,
+        attackCooldown: m.attackCooldown || 0,
       };
     });
     return set(ref(this.db, `rooms/${this.code}/monster`), payload);
@@ -214,13 +229,26 @@ export class MultiplayerRoom {
     });
   }
 
-  writeGame(progress) {
+  revivePlayer(uid) {
+    const prev = this.remotePlayers[uid];
+    if (!prev) return Promise.resolve();
+    return update(ref(this.db, `rooms/${this.code}/players/${uid}`), {
+      isDowned: false,
+      health: 40,
+      alive: true,
+      downedTimer: 0,
+    });
+  }
+
+  writeGame(progress, weather) {
     if (!this.isHost) return Promise.resolve();
-    return set(ref(this.db, `rooms/${this.code}/game`), {
+    const payload = {
       gameOver: !!progress.gameOver,
       win: !!progress.win,
       deaths: progress.deaths || 0,
-    });
+    };
+    if (weather) payload.weather = weather;
+    return set(ref(this.db, `rooms/${this.code}/game`), payload);
   }
 
   dispose() {

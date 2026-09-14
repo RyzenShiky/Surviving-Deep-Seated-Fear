@@ -1,10 +1,10 @@
-/** 200×200 m forest, center (0,0), tiles 25 m */
+/** 425×425 m forest, center (0,0), tiles 25 m */
 export const WORLD = {
-  size: 200,
-  half: 100,
+  size: 425,
+  half: 212.5,
   tileSize: 25,
-  tilesPerSide: 8,
-  areaM2: 40000,
+  tilesPerSide: 17, // 17 * 25 = 425
+  areaM2: 425 * 425,
 };
 
 export function worldToTile(x, z) {
@@ -21,9 +21,10 @@ export function tileIndex(tx, tz) {
 }
 
 export function clampToWorld(x, z) {
+  const m = WORLD.half - 1;
   return {
-    x: Math.max(-WORLD.half + 1, Math.min(WORLD.half - 1, x)),
-    z: Math.max(-WORLD.half + 1, Math.min(WORLD.half - 1, z)),
+    x: Math.max(-m, Math.min(m, x)),
+    z: Math.max(-m, Math.min(m, z)),
   };
 }
 

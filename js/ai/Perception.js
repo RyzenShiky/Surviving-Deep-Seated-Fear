@@ -6,9 +6,9 @@ export class MonsterPerception {
   constructor() {
     this.suspicion = new SuspicionSystem();
   }
-  update(monster, events, now, dt) {
+  update(monster, events, now, dt, weatherMul = 1) {
     this.suspicion.update(dt);
-    const heard = processHearing(monster, events, now, this.suspicion);
+    const heard = processHearing(monster, events, now, this.suspicion, weatherMul);
     monster.memory.suspicion = this.suspicion.value;
     monster.aiState = updateMonsterState(monster.aiState, {
       memory: monster.memory,

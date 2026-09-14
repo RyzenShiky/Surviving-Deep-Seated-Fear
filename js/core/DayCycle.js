@@ -43,13 +43,15 @@ export function lightingForProgress(p) {
 
   if (p < 0.35) {
     const t = p / 0.35;
-    return lerpLight(afternoon, sunset, t * 0.35);
+    const a = lerpLight(afternoon, sunset, t * 0.35); a._key = Math.floor(p * 40); return a;
   }
   if (p < 0.65) {
     const t = (p - 0.35) / 0.3;
-    return lerpLight(sunset, night, t);
+    const b = lerpLight(sunset, night, t); b._key = Math.floor(p * 40); return b;
   }
-  return { ...night };
+  const nightOut = { ...night };
+  nightOut._key = Math.floor(p * 40);
+  return nightOut;
 }
 
 function lerpLight(a, b, t) {
@@ -75,12 +77,13 @@ function lerpColor(c1, c2, t) {
 }
 
 /** Random spawn on ring around player, away from center clear zone */
-export function randomMonsterSpawn(playerPos, minR = 35, maxR = 70) {
+export function randomMonsterSpawn(playerPos, minR = 45, maxR = 110) {
   const ang = Math.random() * Math.PI * 2;
   const r = minR + Math.random() * (maxR - minR);
   let x = (playerPos?.x || 0) + Math.cos(ang) * r;
   let z = (playerPos?.z || 0) + Math.sin(ang) * r;
-  x = Math.max(-95, Math.min(95, x));
-  z = Math.max(-95, Math.min(95, z));
+  const lim = 200;
+  x = Math.max(-lim, Math.min(lim, x));
+  z = Math.max(-lim, Math.min(lim, z));
   return { x, y: 0, z };
 }

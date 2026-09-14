@@ -1,6 +1,6 @@
 import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
-import { buildColliders } from './core/Collision.js';
+import { buildColliders, buildSpatialGrid } from './core/Collision.js';
 import { isTouchDevice } from './core/Device.js';
 import { onOrientationChange, updateRotateHint, tryLandscapeLock } from './core/Orientation.js';
 import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
@@ -8,6 +8,7 @@ import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
 import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
+import { isInsideBuilding } from './core/Buildings.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
@@ -63,7 +64,7 @@ async function init() {
 
   audio = new AudioManager();
   await audio.init();
-  colliders = buildColliders();
+  colliders = buildSpatialGrid(buildColliders());
   renderer = new Renderer();
   await renderer.init(canvas);
 
@@ -111,35 +112,43 @@ function setupLocalGame(fromSave = false) {
     colliders,
     audio
   );
-  // Ensure exactly 1 monster slot
-  if (!state.data.monsters.length) {
-    state.data.monsters = [{
-      id: 'm0',
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { yaw: 0 },
-      aiState: 'PATROL',
-      active: false,
-      memory: {
-        lastHeardPosition: null, lastHeardTime: 0, lastHeardIntensity: 0,
-        confidence: 0, suspicion: 0, searchRadius: 12,
-      },
-      path: [],
-    }];
+  const MONSTER_COUNT = 2;
+  state.data.monsters = Array.from({ length: MONSTER_COUNT }, (_, i) => ({
+    id: 'm' + i,
+    position: { x: 0, y: 0, z: 0 },
+    rotation: { yaw: 0 },
+    aiState: 'PATROL',
+    active: true,
+    memory: {
+      lastHeardPosition: null, lastHeardTime: 0, lastHeardIntensity: 0,
+      confidence: 0, suspicion: 0, searchRadius: 14,
+    },
+    path: [],
+  }));
+  const used = [];
+  for (let i = 0; i < MONSTER_COUNT; i++) {
+    let spawn;
+    for (let tries = 0; tries < 12; tries++) {
+      spawn = randomMonsterSpawn(state.data.player.position, 50 + i * 20, 120 + i * 30);
+      if (used.every((u) => Math.hypot(u.x - spawn.x, u.z - spawn.z) > 40)) break;
+    }
+    used.push(spawn);
+    const mon = state.data.monsters[i];
+    mon.position.x = spawn.x;
+    mon.position.y = 0;
+    mon.position.z = spawn.z;
+    mon.active = true;
+    mon.aiState = 'PATROL';
+    mon.memory.suspicion = 0;
   }
-  state.data.monsters = state.data.monsters.slice(0, 1);
-  const spawn = randomMonsterSpawn(state.data.player.position);
-  const mon = state.data.monsters[0];
-  mon.position.x = spawn.x;
-  mon.position.y = 0;
-  mon.position.z = spawn.z;
-  mon.active = true;
-  mon.aiState = 'PATROL';
-  mon.memory.suspicion = 0;
   state.data.world.elapsed = 0;
   state.data.world.timeLimit = MATCH_SECONDS;
   state.data.progress.timeUp = false;
 
-  monsters = [new MonsterController(state, 0, colliders, room)];
+  player.onThrow = (from, to) => {
+    if (renderer && renderer.spawnThrowable) renderer.spawnThrowable(from, to);
+  };
+  monsters = state.data.monsters.map((_, i) => new MonsterController(state, i, colliders, room));
 
   // Touch controls
   if (isTouchDevice()) {
@@ -150,7 +159,9 @@ function setupLocalGame(fromSave = false) {
     } else {
       touch.keys = player.keys;
     }
-    touch.onFlashToggle = () => {
+    touch.onHide = () => player.toggleHide();
+      touch.onThrowBtn = () => player.throwDistraction();
+      touch.onFlashToggle = () => {
         player.flashlightOn = !player.flashlightOn;
         if (state.data.player) state.data.player.flashlight = player.flashlightOn;
       };
@@ -483,6 +494,7 @@ function startLoop() {
         m.rotation.yaw = r.yaw;
         m.aiState = r.aiState;
         m.memory.suspicion = r.suspicion || 0;
+        m.attackCooldown = r.attackCooldown || 0;
       });
 
       // Apply host-written health to local player (non-host clients)
@@ -516,7 +528,7 @@ function startLoop() {
 
     if (state.data.progress.gameOver) {
       showGameOver(state.data.progress.win);
-      if (room && room.isHost) room.writeGame(state.data.progress);
+      if (room && room.isHost) room.writeGame(state.data.progress, state.data.world.weather);
       return;
     }
 
@@ -536,7 +548,7 @@ function startLoop() {
         }
         if (room.isHost) {
           room.writeMonsters(state.data.monsters);
-          room.writeGame(state.data.progress);
+          room.writeGame(state.data.progress, state.data.world.weather);
         }
         const last = state.data.world.activeSoundEvents.at(-1);
         if (last && now - last.timestamp < 0.15) room.writeSound(last);
@@ -565,6 +577,12 @@ function startLoop() {
       renderer.pruneRemotePlayers(active);
     }
 
+    const ph = document.getElementById('pill-hide');
+    const pb = document.getElementById('pill-breath');
+    const pt = document.getElementById('pill-throw');
+    if (ph) ph.classList.toggle('hidden', !state.data.player.isHiding);
+    if (pb) pb.classList.toggle('hidden', !state.data.player.isHoldingBreath);
+    if (pt) pt.textContent = '×' + (state.data.player.throwables ?? 0);
     const hp = document.getElementById('health-fill');
     if (hp) hp.style.width = `${state.data.player.health}%`;
 
@@ -600,13 +618,88 @@ function startLoop() {
       state.data.progress.escaped = true;
     }
     // Keep max 1 monster
-    if (state.data.monsters.length > 1) state.data.monsters.length = 1;
+    
+    
+    // Dynamic weather (host authority in multi)
+    if (mode === 'solo' || (room && room.isHost)) {
+      const w = state.data.world;
+      w.weatherTimer = (w.weatherTimer || 0) + dt;
+      if (w.weatherTimer >= (w.weatherNextChange || 50)) {
+        w.weatherTimer = 0;
+        w.weatherNextChange = 40 + Math.random() * 35;
+        w.weather = w.weather === 'rain' ? 'clear' : 'rain';
+      }
+    } else if (room && room.gameStatus && room.gameStatus.weather) {
+      state.data.world.weather = room.gameStatus.weather;
+    }
+    const raining = state.data.world.weather === 'rain';
+    if (raining !== state._lastRaining) {
+      state._lastRaining = raining;
+      if (renderer.setRain) renderer.setRain(raining);
+      if (audio.setRain) audio.setRain(raining);
+      const wx = document.getElementById('weather-label');
+      if (wx) wx.textContent = raining ? 'HUJAN' : '';
+      // force lighting refresh on weather flip
+      if (renderer._lastLightKey != null) renderer._lastLightKey = -1;
+    }
+
+    // Revive hold E
+    if (room && !state.data.player.isDowned) {
+      let nearDowned = null;
+      for (const [uid, rp] of Object.entries(room.remotePlayers || {})) {
+        if (uid === room.uid || !rp.isDowned) continue;
+        const d = Math.hypot(rp.x - state.data.player.position.x, rp.z - state.data.player.position.z);
+        if (d < 2.4) { nearDowned = uid; break; }
+      }
+      const bar = document.getElementById('revive-bar');
+      if (nearDowned && (player.keys.has('KeyE') || player._reviveHold)) {
+        player._reviveAcc = (player._reviveAcc || 0) + dt;
+        if (bar) {
+          bar.classList.remove('hidden');
+          bar.textContent = 'Revive ' + Math.min(100, Math.floor((player._reviveAcc / 3) * 100)) + '%';
+        }
+        if (player._reviveAcc >= 3) {
+          player._reviveAcc = 0;
+          room.revivePlayer(nearDowned);
+          // Host self-sync if somehow - N/A for other
+        }
+      } else {
+        player._reviveAcc = 0;
+        if (bar) bar.classList.add('hidden');
+      }
+    }
+    // Host revived by peer: read own remote entry
+    if (room && room.remotePlayers[room.uid]) {
+      const me = room.remotePlayers[room.uid];
+      if (state.data.player.isDowned && me.isDowned === false && (me.health || 0) > 0) {
+        state.data.player.isDowned = false;
+        state.data.player.health = me.health || 40;
+        state.data.player.downedTimer = 0;
+        state.data.player.alive = true;
+      }
+      if (typeof me.isDowned === 'boolean' && me.isDowned && !state.data.player.isDowned && room.uid) {
+        // remote damage applied to us
+        if ((me.health || 0) === 0 || me.isDowned) {
+          state.data.player.isDowned = true;
+          state.data.player.health = 0;
+          state.data.player.downedTimer = me.downedTimer || 45;
+        }
+      }
+    }
 
     const { dist: mDist } = nearestMonsterDist(state.data.player.position, state.data.monsters);
     const { bpm, danger } = heartFromDistance(mDist);
     updateProximityUI(mDist);
     tickHeartbeat(dt, bpm, danger);
-    renderer.render(state.data, eye, yaw, state.data.player.rotation.pitch);
+    const inside = isInsideBuilding(state.data.player.position.x, state.data.player.position.z);
+    const loc = document.getElementById('location-hint');
+    if (loc) {
+      if (inside) {
+        loc.textContent = inside.type === 'building' ? 'Gedung' : 'Rumah';
+        loc.classList.remove('hidden');
+      } else loc.classList.add('hidden');
+    }
+    renderer.render(state.data, eye, yaw, state.data.player.rotation.pitch, dt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
