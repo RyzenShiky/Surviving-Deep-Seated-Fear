@@ -153,3 +153,42 @@
   background: rgba(0,0,0,0.5); border: 1px solid #555; color: #ccc;
 }
 .pill.hidden { display: none; }
+
+/* ---------- Sanity meter ---------- */
+#sanity-bar {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: 90px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #3a2a44;
+}
+#sanity-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #4b3a7a, #9b6bd1);
+  transition: width 0.3s ease;
+}
+#app.sanity-low #sanity-fill,
+#app.sanity-critical #sanity-fill {
+  animation: sanityFlicker 1.6s ease-in-out infinite;
+}
+@keyframes sanityFlicker { 50% { opacity: 0.55; } }
+
+/* ---------- Whisper caption (brief hallucinated-sound cue) ---------- */
+#whisper-caption {
+  position: absolute;
+  top: 3.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.08em;
+  color: rgba(180, 150, 210, 0.75);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+#whisper-caption.flash-out { opacity: 1; }
+#whisper-caption.hidden { display: none; }

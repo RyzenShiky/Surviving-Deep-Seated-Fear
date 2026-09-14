@@ -116,4 +116,86 @@ export class AudioManager {
     osc.start(t0);
     osc.stop(t0 + 0.2);
   }
+
+  /** Sharp noise burst + falling drone — used by JumpscareManager. */
+  playJumpscareStinger() {
+    if (!this.ctx || !this.sfx) return;
+    const t0 = this.ctx.currentTime;
+
+    const noiseBuf = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.4, this.ctx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 400;
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t0);
+    ng.gain.exponentialRampToValueAtTime(0.9, t0 + 0.02);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+    noise.connect(hp);
+    hp.connect(ng);
+    ng.connect(this.sfx);
+    noise.start(t0);
+    noise.stop(t0 + 0.45);
+
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, t0);
+    osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.5);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t0);
+    og.gain.exponentialRampToValueAtTime(0.55, t0 + 0.03);
+    og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
+    osc.connect(og);
+    og.connect(this.sfx);
+    osc.start(t0);
+    osc.stop(t0 + 0.6);
+  }
+
+  /** Filtered noise "whisper" — used at low sanity. Never spatialized; it's in the player's head. */
+  playWhisper(intensity = 0.3) {
+    if (!this.ctx || !this.sfx) return;
+    const t0 = this.ctx.currentTime;
+    const bufSize = Math.floor(this.ctx.sampleRate * 1.2);
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.6;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1400 + Math.random() * 800;
+    bp.Q.value = 6;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.05 * intensity, t0 + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(this.sfx);
+    src.start(t0);
+    src.stop(t0 + 1.2);
+  }
+
+  /**
+   * Muffles/warps the whole SFX bus as sanity drops. intensity is 0 (fine)
+   * to 1 (barely-there sanity). Lazily inserts a lowpass filter into the
+   * sfx→master chain the first time it's used.
+   */
+  setSanityFilter(intensity) {
+    if (!this.ctx || !this.sfx || !this.master) return;
+    if (!this._sanityFilter) {
+      this._sanityFilter = this.ctx.createBiquadFilter();
+      this._sanityFilter.type = 'lowpass';
+      this._sanityFilter.frequency.value = 18000;
+      this.sfx.disconnect();
+      this.sfx.connect(this._sanityFilter);
+      this._sanityFilter.connect(this.master);
+    }
+    const clamped = Math.max(0, Math.min(1, intensity));
+    const freq = 18000 - clamped * 15000;
+    this._sanityFilter.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.3);
+  }
 }

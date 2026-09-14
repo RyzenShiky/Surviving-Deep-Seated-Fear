@@ -9,6 +9,8 @@ import { MonsterController } from './gameplay/Monster.js';
 import { nearestMonsterDist, heartFromDistance } from './gameplay/Proximity.js';
 import { MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpawn } from './core/DayCycle.js';
 import { isInsideBuilding } from './core/Buildings.js';
+import { SanityManager } from './gameplay/Sanity.js';
+import { JumpscareManager } from './gameplay/Jumpscare.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
@@ -27,15 +29,22 @@ let profile = loadProfile();
 const ESCAPE_TIME = MATCH_SECONDS;
 let heartAcc = 0;
 let lastNearDist = Infinity;
+let sanity = new SanityManager();
+let jumpscare = new JumpscareManager();
+let jumpscareHideTimer = null;
 
 async function init() {
   const canvas = document.getElementById('game-canvas');
   try { initFirebase(); } catch (e) { console.warn('Firebase', e); }
 
-  // Complete Google redirect sign-in if returning from Google
+  // Complete Google redirect sign-in if returning from Google (timeout so init never hangs)
   try {
+    initFirebase();
     const auth = getAuth();
-    const cred = await getRedirectResult(auth);
+    const cred = await Promise.race([
+      getRedirectResult(auth),
+      new Promise((res) => setTimeout(() => res(null), 3000)),
+    ]);
     if (cred && cred.user) {
       profile.displayName = (cred.user.displayName || 'Player').slice(0, 16);
       profile.uid = cred.user.uid;
@@ -44,7 +53,7 @@ async function init() {
       saveProfile(profile);
       const nameInput = document.getElementById('profile-name');
       if (nameInput) nameInput.value = profile.displayName;
-      enterMenu();
+      window.__longwayGoogleLogin = true;
     }
   } catch (e) {
     console.warn('getRedirectResult', e);
@@ -73,6 +82,18 @@ async function init() {
   onResize();
   clock = new Clock();
   wireUI(canvas);
+  {
+    const st = document.getElementById('login-status');
+    if (st) st.textContent = 'Siap — pilih Guest atau Google';
+    const bg = document.getElementById('btn-guest');
+    const bgg = document.getElementById('btn-google');
+    if (bg) bg.disabled = false;
+    if (bgg) bgg.disabled = false;
+    if (window.__longwayGoogleLogin) {
+      window.__longwayGoogleLogin = false;
+      enterMenu();
+    }
+  }
 
   onOrientationChange(() => {
     updateRotateHint();
@@ -144,6 +165,9 @@ function setupLocalGame(fromSave = false) {
   state.data.world.elapsed = 0;
   state.data.world.timeLimit = MATCH_SECONDS;
   state.data.progress.timeUp = false;
+  sanity = new SanityManager();
+  jumpscare = new JumpscareManager();
+  hideJumpscare();
 
   player.onThrow = (from, to) => {
     if (renderer && renderer.spawnThrowable) renderer.spawnThrowable(from, to);
@@ -230,34 +254,72 @@ async function beginMultiGame() {
 function wireUI(canvas) {
   // Login
   document.getElementById('btn-guest').addEventListener('click', async () => {
-    const name = document.getElementById('profile-name').value.trim() || profile.displayName;
-    profile.displayName = name.slice(0, 16);
-    profile.provider = 'guest';
-    ensureUid(profile);
-    // align multiplayer uid with profile when possible
-    localStorage.setItem('longway_uid', profile.uid);
-    saveProfile(profile);
+    const btn = document.getElementById('btn-guest');
+    const err = document.getElementById('login-error');
+    const st = document.getElementById('login-status');
+    if (btn) btn.disabled = true;
+    if (err) err.textContent = '';
+    if (st) st.textContent = 'Masuk sebagai guest…';
     try {
-      const auth = getAuth();
-      await signInAnonymously(auth);
+      const name = document.getElementById('profile-name').value.trim() || profile.displayName;
+      profile.displayName = name.slice(0, 16);
+      profile.provider = 'guest';
+      ensureUid(profile);
+      localStorage.setItem('longway_uid', profile.uid);
+      saveProfile(profile);
+      try {
+        initFirebase();
+        const auth = getAuth();
+        await Promise.race([
+          signInAnonymously(auth),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('auth-timeout')), 2500)),
+        ]);
+        // IMPORTANT: the Firebase security rules gate writes to
+        // /rooms/{code}/players/{uid} on `auth.uid === $uid`. That only
+        // works if the id we use as $uid is the *real* Firebase Auth uid —
+        // not a separate random id we made up ourselves. Re-align them here
+        // so multiplayer writes don't silently fail as permission-denied.
+        if (auth.currentUser) {
+          profile.uid = auth.currentUser.uid;
+          localStorage.setItem('longway_uid', profile.uid);
+          saveProfile(profile);
+        }
+      } catch (e) {
+        console.warn('Anonymous auth skipped:', e.message || e);
+      }
+      enterMenu();
     } catch (e) {
-      console.warn('Anonymous auth optional fail', e);
+      console.error(e);
+      if (err) err.textContent = e.message || 'Gagal masuk';
+      if (btn) btn.disabled = false;
+      if (st) st.textContent = '';
     }
-    enterMenu();
   });
 
   document.getElementById('btn-google').addEventListener('click', async () => {
     const err = document.getElementById('login-error');
-    err.textContent = '';
+    const st = document.getElementById('login-status');
+    const btn = document.getElementById('btn-google');
+    if (err) err.textContent = '';
+    if (st) st.textContent = 'Mengalihkan ke Google…';
+    if (btn) btn.disabled = true;
     try {
       initFirebase();
       const auth = getAuth();
       const provider = new GoogleAuthProvider();
       await signInWithRedirect(auth, provider);
-      // Browser navigates away; getRedirectResult in init() finishes login
     } catch (e) {
       console.error(e);
-      err.textContent = e.message || 'Google sign-in failed. Use Guest.';
+      let msg = e.message || 'Google gagal';
+      const code = String(e.code || '');
+      if (code.includes('operation-not-allowed')) {
+        msg = 'Google Auth belum aktif di Firebase Console. Pakai Guest.';
+      } else if (code.includes('unauthorized-domain')) {
+        msg = 'Domain belum di-authorize di Firebase. Pakai Guest.';
+      }
+      if (err) err.textContent = msg;
+      if (st) st.textContent = '';
+      if (btn) btn.disabled = false;
     }
   });
 
@@ -469,6 +531,63 @@ function tickHeartbeat(dt, bpm, danger) {
   }
 }
 
+
+function tickSanity(dt, nearestMonsterDistVal, isDark) {
+  if (!state) return;
+  const { tier, value } = sanity.update(state.data.player, dt, nearestMonsterDistVal, isDark);
+  const fill = document.getElementById('sanity-fill');
+  if (fill) fill.style.width = `${value}%`;
+  const app = document.getElementById('app');
+  if (app) {
+    app.classList.toggle('sanity-shaken', tier === 'shaken');
+    app.classList.toggle('sanity-low', tier === 'low');
+    app.classList.toggle('sanity-critical', tier === 'critical');
+  }
+  if (audio) audio.setSanityFilter(tier === 'stable' ? 0 : tier === 'shaken' ? 0.15 : tier === 'low' ? 0.4 : 0.75);
+  if (audio && sanity.tickWhisper(dt, tier)) {
+    audio.playWhisper(tier === 'critical' ? 0.6 : 0.3);
+    const wl = document.getElementById('whisper-caption');
+    if (wl) {
+      wl.classList.remove('hidden');
+      wl.classList.add('flash-out');
+      setTimeout(() => { wl.classList.add('hidden'); wl.classList.remove('flash-out'); }, 900);
+    }
+  }
+}
+
+function tickJumpscare(dt, nearestMonsterDistVal, nearestMonsterState) {
+  const kind = jumpscare.update(dt, {
+    nearestMonsterDist: nearestMonsterDistVal,
+    nearestMonsterState,
+    sanityTier: sanity.lastTier,
+    playerAlive: state ? state.data.player.alive : false,
+  });
+  if (kind) showJumpscare(kind);
+}
+
+function showJumpscare(kind) {
+  const overlay = document.getElementById('jumpscare-overlay');
+  if (audio) audio.playJumpscareStinger();
+  const app = document.getElementById('app');
+  if (app) {
+    app.classList.remove('screen-shake');
+    void app.offsetWidth;
+    app.classList.add('screen-shake');
+  }
+  if (!overlay) return;
+  overlay.classList.remove('hidden', 'hallucination');
+  if (kind === 'hallucination') overlay.classList.add('hallucination');
+  void overlay.offsetWidth;
+  overlay.classList.add('visible');
+  clearTimeout(jumpscareHideTimer);
+  jumpscareHideTimer = setTimeout(hideJumpscare, 420);
+}
+
+function hideJumpscare() {
+  const overlay = document.getElementById('jumpscare-overlay');
+  if (overlay) overlay.classList.remove('visible', 'hallucination');
+  clearTimeout(jumpscareHideTimer);
+}
 
 function startLoop() {
   if (running) return;
@@ -687,11 +806,14 @@ function startLoop() {
       }
     }
 
-    const { dist: mDist } = nearestMonsterDist(state.data.player.position, state.data.monsters);
+    const { dist: mDist, monster: nearestMon } = nearestMonsterDist(state.data.player.position, state.data.monsters);
     const { bpm, danger } = heartFromDistance(mDist);
     updateProximityUI(mDist);
     tickHeartbeat(dt, bpm, danger);
     const inside = isInsideBuilding(state.data.player.position.x, state.data.player.position.z);
+    const isDarkOutside = !inside && !state.data.player.flashlight && phase !== 'afternoon';
+    tickSanity(dt, mDist, isDarkOutside);
+    tickJumpscare(dt, mDist, nearestMon ? nearestMon.aiState : null);
     const loc = document.getElementById('location-hint');
     if (loc) {
       if (inside) {

@@ -32,7 +32,8 @@
     <div id="ui-root">
       <!-- LOGIN / PROFILE -->
       <div id="login-screen" class="screen">
-        <h1>LONGWAY</h1>
+        <div class="fog-layer" aria-hidden="true"></div>
+        <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
         <p class="subtitle">Sign in to continue</p>
         <label>Display name
           <input type="text" id="profile-name" maxlength="16" placeholder="Your name" />
@@ -45,13 +46,15 @@
           <div class="color-swatch" data-color="#6a5acd" style="background:#6a5acd"></div>
           <div class="color-swatch" data-color="#b22222" style="background:#b22222"></div>
         </div>
-        <button id="btn-guest" class="btn primary">Play as Guest</button>
-        <button id="btn-google" class="btn">Continue with Google</button>
+        <button id="btn-guest" class="btn primary" disabled>Play as Guest</button>
+        <button id="btn-google" class="btn" disabled>Continue with Google</button>
+        <p id="login-status" class="subtitle">Memuat aset…</p>
         <p id="login-error" class="subtitle" style="color:#c44"></p>
       </div>
 
       <div id="menu-screen" class="screen hidden">
-        <h1>LONGWAY</h1>
+        <div class="fog-layer" aria-hidden="true"></div>
+        <h1 class="flicker-title" data-text="LONGWAY">LONGWAY</h1>
         <p class="subtitle">Don't make a sound.</p>
         <p id="menu-player-name" class="subtitle"></p>
         <button id="btn-start" class="btn primary">Start Game</button>
@@ -85,10 +88,15 @@
         <button id="btn-lobby-leave" class="btn">Leave</button>
       </div>
 
+      <div id="grain-overlay" aria-hidden="true"></div>
+      <div id="vignette-overlay" aria-hidden="true"></div>
       <div id="danger-overlay" aria-hidden="true"></div>
+      <div id="jumpscare-overlay" class="hidden" aria-hidden="true"></div>
       <div id="hud" class="hidden">
         <div id="stamina-bar"><div id="stamina-fill"></div></div>
         <div id="health-bar"><div id="health-fill"></div></div>
+        <div id="sanity-bar" title="Sanity"><div id="sanity-fill"></div></div>
+        <p id="whisper-caption" class="hidden" aria-hidden="true">…did you hear that?</p>
         <div id="suspicion-indicator"></div>
         <div id="crosshair">+</div>
         <div id="heart-rate"><span id="heart-icon">♥</span> <span id="heart-bpm">70</span> BPM</div>

@@ -8,6 +8,7 @@ export function createInitialState() {
       isCrouching: false,
       isRunning: false,
       health: 100,
+      sanity: 100,
       alive: true,
       flashlight: false,
       isHiding: false,
