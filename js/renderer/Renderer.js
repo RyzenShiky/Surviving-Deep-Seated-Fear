@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { WORLD, tileSeed } from '../core/WorldConfig.js';
 import { BUILDING_DEFS, nearBuilding } from '../core/Buildings.js';
 import { recommendGraphics } from '../core/Device.js';
@@ -125,7 +125,7 @@ export class Renderer {
     }
 
     for (let i = 0; i < 2; i++) {
-      const m = SkeletonUtils.clone(this.monsterTemplate);
+      const m = skeletonClone(this.monsterTemplate);
       m.traverse((c) => {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
@@ -539,7 +539,7 @@ export class Renderer {
     if (uid === myUid) return;
     let mesh = this.remoteMeshes[uid];
     if (!mesh && this.playerTemplate) {
-      mesh = SkeletonUtils.clone(this.playerTemplate);
+      mesh = skeletonClone(this.playerTemplate);
       mesh.traverse((c) => {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });
