@@ -199,3 +199,65 @@ export class AudioManager {
     this._sanityFilter.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.3);
   }
 }
+
+  playKnock(volume = 0.25) {
+    if (!this.ctx || !this.sfx) return;
+    const t0 = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, t0);
+    osc.frequency.exponentialRampToValueAtTime(40, t0 + 0.08);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(Math.min(0.5, volume), t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    osc.connect(gain);
+    gain.connect(this.sfx);
+    osc.start(t0);
+    osc.stop(t0 + 0.22);
+  }
+
+  playCrashThud(force = 0.5) {
+    if (!this.ctx || !this.sfx) return;
+    const t0 = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(80, t0);
+    osc.frequency.exponentialRampToValueAtTime(25, t0 + 0.25);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.4 * Math.min(1, force), t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+    osc.connect(gain);
+    gain.connect(this.sfx);
+    osc.start(t0);
+    osc.stop(t0 + 0.4);
+  }
+
+  async playPositionalFile(url, pos) {
+    if (!this.ctx || !this.sfx || !url) return;
+    try {
+      if (this._billboardAudio) {
+        try { this._billboardAudio.stop(); } catch {}
+        this._billboardAudio = null;
+      }
+      const res = await fetch(url);
+      const buf = await this.ctx.decodeAudioData(await res.arrayBuffer());
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const panner = this.ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.refDistance = 5;
+      panner.maxDistance = 200;
+      panner.positionX.value = pos.x;
+      panner.positionY.value = pos.y || 2;
+      panner.positionZ.value = pos.z;
+      src.connect(panner);
+      panner.connect(this.sfx);
+      src.start();
+      this._billboardAudio = src;
+    } catch (e) {
+      console.warn('playPositionalFile', e);
+    }
+  }

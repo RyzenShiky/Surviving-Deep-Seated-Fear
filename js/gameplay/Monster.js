@@ -52,12 +52,22 @@ export class MonsterController {
 
     const events = this.state.data.world.activeSoundEvents.filter((e) => now - e.timestamp < 2.5);
     const weatherMul = this.state.data.world.weather === 'rain' ? 0.55 : 1;
-    this.perception.update(m, events, now, dt, weatherMul);
+    const ppos = this.state.data.player.position;
+    const distP = Math.hypot(m.position.x - ppos.x, m.position.z - ppos.z);
+    this.perception.update(m, events, now, dt, weatherMul, {
+      playerPos: ppos,
+      distToPlayer: distP,
+      pacingOk: this._pacingOk !== false,
+      onGhostEvent: this._onGhostEvent,
+    });
 
     const frenzy = this._frenzyMul(m);
     const base = this.moveSpeed;
 
     switch (m.aiState) {
+      case 'STUNNED':
+        // frozen until StateMachine clears
+        break;
       case 'PATROL':
         this.widePatrol(m, dt, base * 0.8 * Math.min(1.2, frenzy));
         break;
@@ -117,6 +127,7 @@ export class MonsterController {
   }
 
   _tryAttack(m) {
+    if (m.memory && m.memory._ghostInvestigate) return;
     if (this.attackCooldown > 0) return;
     const canAttack =
       m.aiState === 'CHASE' || m.aiState === 'INVESTIGATE' || (m.memory.suspicion || 0) > 40;

@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>LONGWAY — Horror 3D</title>
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="screen-orientation" content="landscape" />
   <link rel="stylesheet" href="./css/base/reset.css" />
   <link rel="stylesheet" href="./css/base/variables.css" />
   <link rel="stylesheet" href="./css/layout/main.css" />
@@ -24,8 +28,9 @@
 <body class="horror-theme">
   <div id="rotate-hint" aria-live="polite">
     <div class="icon">📱</div>
-    <p><strong>Putar perangkat ke landscape</strong></p>
-    <p class="subtitle" style="max-width:16rem">Game ini dirancang untuk layar mendatar (HP/tablet landscape).</p>
+    <p><strong>Putar ke landscape</strong></p>
+    <p class="subtitle" style="max-width:16rem">Game otomatis meminta mode mendatar. Putar HP/tablet, lalu ketuk layar.</p>
+    <button type="button" id="btn-force-landscape" class="btn primary" style="pointer-events:auto;margin-top:0.75rem">Aktifkan Landscape</button>
   </div>
   <div id="app">
     <canvas id="game-canvas" tabindex="0"></canvas>
@@ -133,6 +138,14 @@
         <button id="btn-menu" class="btn">Main Menu</button>
       </div>
     </div>
+  </div>
+  <div id="billboard-panel" class="bb-panel" aria-hidden="true">
+    <h3>Billboard</h3>
+    <p class="subtitle">Upload image / video / audio (host preferred)</p>
+    <input type="file" id="bb-file" accept="image/*,video/mp4,audio/mpeg,audio/mp3" />
+    <button id="bb-upload" class="btn primary" type="button">Upload</button>
+    <button id="bb-close" class="btn" type="button">Close</button>
+    <p id="bb-status" class="subtitle"></p>
   </div>
   <script type="module" src="./js/main.js"></script>
 </body>

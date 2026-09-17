@@ -17,6 +17,10 @@ export class Renderer {
     this.monsterAnimations = [];
     this.playerAnimations = [];
     this.mixers = [];
+    this.vehicleModels = {};
+    this.vehicleMeshes = {};
+    this.billboardMesh = null;
+    this._lastBillboardUrl = null;
     this.throwables = [];
     this.rainMesh = null;
     this._rainOn = false;
@@ -92,6 +96,8 @@ export class Renderer {
     this.sunLight.position.set(40, 60, 20);
     this.sunLight.castShadow = gfx.shadows;
     this.scene.add(this.sunLight);
+    this.fillLight = new THREE.HemisphereLight(0x2a3a2a, 0x0a0a0a, 0.12);
+    this.scene.add(this.fillLight);
 
     // Load GLB models
     const loader = new GLTFLoader();
@@ -113,6 +119,21 @@ export class Renderer {
       const plGltf = await loader.loadAsync('./assets/player.glb');
       this.playerTemplate = plGltf.scene;
       this.playerAnimations = plGltf.animations || [];
+      try {
+        const motorGltf = await loader.loadAsync('./assets/motor.glb');
+        this.vehicleModels.motor = motorGltf.scene;
+        const mobilGltf = await loader.loadAsync('./assets/mobil.glb');
+        this.vehicleModels.mobil = mobilGltf.scene;
+      } catch (e) {
+        console.warn('Vehicle models', e);
+      }
+      // Billboard plane (world)
+      const bbGeo = new THREE.PlaneGeometry(12, 7);
+      const bbMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, side: THREE.DoubleSide });
+      this.billboardMesh = new THREE.Mesh(bbGeo, bbMat);
+      this.billboardMesh.position.set(30, 5, -80);
+      this.billboardMesh.rotation.y = Math.PI * 0.15;
+      this.scene.add(this.billboardMesh);
       this.playerTemplate.traverse((c) => {
         if (c.isMesh) {
           c.castShadow = gfx.shadows;
@@ -299,6 +320,61 @@ export class Renderer {
       }
     }
     this.rainMesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+
+  syncVehicles(vehicles) {
+    const seen = new Set();
+    for (const v of vehicles || []) {
+      seen.add(v.id);
+      let mesh = this.vehicleMeshes[v.id];
+      if (!mesh) {
+        const tpl = this.vehicleModels[v.type];
+        if (!tpl) continue;
+        mesh = tpl.clone(true);
+        mesh.traverse((c) => {
+          if (c.isMesh && c.material) c.material = c.material.clone();
+        });
+        this.scene.add(mesh);
+        this.vehicleMeshes[v.id] = mesh;
+      }
+      mesh.position.set(v.position.x, v.position.y || 0, v.position.z);
+      mesh.rotation.y = v.rotation.yaw;
+    }
+    for (const id of Object.keys(this.vehicleMeshes)) {
+      if (!seen.has(id)) {
+        this.scene.remove(this.vehicleMeshes[id]);
+        delete this.vehicleMeshes[id];
+      }
+    }
+  }
+
+  applyBillboardMedia(data, audio) {
+    if (!this.billboardMesh || !data || !data.url) return;
+    if (data.url === this._lastBillboardUrl) return;
+    this._lastBillboardUrl = data.url;
+    const pos = this.billboardMesh.position;
+    if (data.type === 'image') {
+      new THREE.TextureLoader().load(data.url, (tex) => {
+        this.billboardMesh.material.map = tex;
+        this.billboardMesh.material.color.setHex(0xffffff);
+        this.billboardMesh.material.needsUpdate = true;
+      });
+    } else if (data.type === 'video') {
+      const video = document.createElement('video');
+      video.src = data.url;
+      video.crossOrigin = 'anonymous';
+      video.loop = true;
+      video.muted = true; // autoplay policy; user can unmute via UI later
+      video.playsInline = true;
+      video.play().catch(() => {});
+      const tex = new THREE.VideoTexture(video);
+      this.billboardMesh.material.map = tex;
+      this.billboardMesh.material.color.setHex(0xffffff);
+      this.billboardMesh.material.needsUpdate = true;
+    } else if (data.type === 'audio' && audio) {
+      audio.playPositionalFile(data.url, { x: pos.x, y: pos.y, z: pos.z });
+    }
   }
 
   _setupAnimated(mesh, clips, defaultClip) {

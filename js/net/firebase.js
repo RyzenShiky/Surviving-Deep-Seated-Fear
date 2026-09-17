@@ -2,6 +2,9 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.0/firebas
 import {
   getDatabase, ref, set, update, onValue, onDisconnect, get, push,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js';
+import {
+  getStorage, ref as sRef, uploadBytes, getDownloadURL,
+} from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC5T3AoTWf6qn67JGMltq-j349oMAcqH9w',
@@ -25,6 +28,20 @@ export function initFirebase() {
 
 export function getDb() {
   return initFirebase();
+}
+
+export function getStorageRef() {
+  if (!app) initFirebase();
+  return getStorage(app);
+}
+
+export async function uploadBillboardMedia(file, roomCode) {
+  const storage = getStorageRef();
+  const safe = (file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `billboard/${roomCode || 'solo'}/${Date.now()}_${safe}`;
+  const fileRef = sRef(storage, path);
+  await uploadBytes(fileRef, file);
+  return getDownloadURL(fileRef);
 }
 
 export function deviceUid() {
@@ -58,6 +75,8 @@ export class MultiplayerRoom {
     this.remotePlayers = {};
     this.remoteMonsters = {};
     this.remoteSounds = [];
+    this.remoteVehicles = {};
+    this.remoteBillboard = null;
     this.gameStatus = { gameOver: false, win: false };
     this.meta = { hostUid: null, started: false };
     this.onUpdate = null;
@@ -134,6 +153,8 @@ export class MultiplayerRoom {
       this.remoteMonsters = v.monster || {};
       this.remoteSounds = v.soundEvents ? Object.values(v.soundEvents) : [];
       this.gameStatus = v.game || { gameOver: false, win: false };
+      this.remoteVehicles = v.vehicles || {};
+      this.remoteBillboard = v.billboard || null;
       this.meta = v.meta || { hostUid: null, started: false };
 
       if (this.meta.hostUid === this.uid) this.isHost = true;
@@ -169,6 +190,8 @@ export class MultiplayerRoom {
       moveState: player.moveState || 'idle',
       isDowned: !!player.isDowned,
       downedTimer: player.downedTimer || 0,
+      ridingVehicleId: player.ridingVehicleId || null,
+      ridingRole: player.ridingRole || null,
       name: prev.name || ('Player_' + this.uid.slice(-4)),
       joinedAt: prev.joinedAt || Date.now(),
     });
@@ -237,6 +260,34 @@ export class MultiplayerRoom {
       health: 40,
       alive: true,
       downedTimer: 0,
+    });
+  }
+
+  
+  writeVehicles(vehicles) {
+    if (!this.isHost) return Promise.resolve();
+    const payload = {};
+    for (const v of vehicles || []) {
+      payload[v.id] = {
+        type: v.type,
+        x: v.position.x,
+        y: v.position.y || 0,
+        z: v.position.z,
+        yaw: v.rotation.yaw,
+        driver: v.driverUid,
+        passengers: v.passengerUids || [],
+        speed: v.speed || 0,
+      };
+    }
+    return set(ref(this.db, `rooms/${this.code}/vehicles`), payload);
+  }
+
+  setBillboard(url, type) {
+    return set(ref(this.db, `rooms/${this.code}/billboard`), {
+      url,
+      type,
+      by: this.uid,
+      t: Date.now(),
     });
   }
 

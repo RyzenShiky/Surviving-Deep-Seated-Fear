@@ -1,7 +1,11 @@
 /* Prefer landscape on phones/tablets */
-@media screen and (orientation: portrait) and (max-width: 900px) {
-  #rotate-hint {
+@media screen and (orientation: portrait) {
+  body.is-touch #rotate-hint {
     display: flex !important;
+  }
+  body.is-touch #app {
+    visibility: hidden;
+    pointer-events: none;
   }
 }
 
@@ -119,3 +123,12 @@
 
 body.is-portrait #app { /* hint covers */ }
 body.is-landscape #rotate-hint { display: none !important; }
+
+#btn-force-landscape {
+  min-width: 200px;
+  padding: 0.75rem 1.25rem;
+}
+body.is-landscape #app {
+  visibility: visible;
+  pointer-events: auto;
+}

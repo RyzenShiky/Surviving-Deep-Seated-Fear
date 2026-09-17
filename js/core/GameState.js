@@ -18,7 +18,10 @@ export function createInitialState() {
       moveState: 'idle',
       isDowned: false,
       downedTimer: 0,
+      ridingVehicleId: null,
+      ridingRole: null,
     },
+    vehicles: [],
     monsters: [
       {
         id: 'm0',
@@ -46,6 +49,10 @@ export function createInitialState() {
       timeLimit: 180, // 3 minutes
       elapsed: 0,
       activeSoundEvents: [],
+      worldEvents: {
+        familyPhoto: { stage: 0 },
+        cabinLight: { stage: 0 },
+      },
     },
     progress: {
       playTime: 0,
@@ -99,6 +106,17 @@ export class GameState {
 
   static clearSave() {
     localStorage.removeItem(SAVE_KEY);
+  }
+
+  getVehicle(id) {
+    return (this.data.vehicles || []).find((v) => v.id === id) || null;
+  }
+
+  triggerWorldEvent(key, stage) {
+    if (!this.data.world.worldEvents) this.data.world.worldEvents = {};
+    if (!this.data.world.worldEvents[key]) this.data.world.worldEvents[key] = { stage: 0 };
+    this.data.world.worldEvents[key].stage = stage;
+    this.data.world.worldEvents[key].changedAt = performance.now();
   }
 
   emitSound(ev) {

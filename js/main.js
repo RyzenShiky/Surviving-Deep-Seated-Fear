@@ -2,7 +2,7 @@ import { GameState } from './core/GameState.js';
 import { Clock } from './core/Clock.js';
 import { buildColliders, buildSpatialGrid } from './core/Collision.js';
 import { isTouchDevice } from './core/Device.js';
-import { onOrientationChange, updateRotateHint, tryLandscapeLock } from './core/Orientation.js';
+import { onOrientationChange, updateRotateHint, tryLandscapeLock, installLandscapeAutoLock } from './core/Orientation.js';
 import { loadProfile, saveProfile, ensureUid } from './core/Profile.js';
 import { PlayerController } from './gameplay/Player.js';
 import { MonsterController } from './gameplay/Monster.js';
@@ -11,10 +11,14 @@ import { MATCH_SECONDS, phaseFromProgress, lightingForProgress, randomMonsterSpa
 import { isInsideBuilding } from './core/Buildings.js';
 import { SanityManager } from './gameplay/Sanity.js';
 import { JumpscareManager } from './gameplay/Jumpscare.js';
+import { PacingDirector } from './core/PacingDirector.js';
+import { DreadSequencer } from './audio/DreadSequencer.js';
+import { installSecretCodes } from './input/SecretCode.js';
+import { VehicleController, findDismountSpot } from './gameplay/Vehicle.js';
+import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid, uploadBillboardMedia } from './net/firebase.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Renderer } from './renderer/Renderer.js';
 import { TouchControls } from './input/TouchControls.js';
-import { MultiplayerRoom, roomCode as genRoomCode, initFirebase, deviceUid } from './net/firebase.js';
 import {
   getAuth, signInAnonymously, GoogleAuthProvider, signInWithRedirect, getRedirectResult,
 } from 'https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js';
@@ -31,6 +35,9 @@ let heartAcc = 0;
 let lastNearDist = Infinity;
 let sanity = new SanityManager();
 let jumpscare = new JumpscareManager();
+let pacing = new PacingDirector();
+let dread = null;
+let vehicleControllers = [];
 let jumpscareHideTimer = null;
 
 async function init() {
@@ -73,6 +80,7 @@ async function init() {
 
   audio = new AudioManager();
   await audio.init();
+  dread = new DreadSequencer(audio);
   colliders = buildSpatialGrid(buildColliders());
   renderer = new Renderer();
   await renderer.init(canvas);
@@ -82,6 +90,38 @@ async function init() {
   onResize();
   clock = new Clock();
   wireUI(canvas);
+  installSecretCodes({
+    onTrue: () => {
+      document.getElementById('billboard-panel')?.classList.toggle('open');
+    },
+    onMotor: () => spawnVehicle('motor'),
+    onMobil: () => spawnVehicle('mobil'),
+  });
+  document.getElementById('bb-close')?.addEventListener('click', () => {
+    document.getElementById('billboard-panel')?.classList.remove('open');
+  });
+  document.getElementById('bb-upload')?.addEventListener('click', async () => {
+    const file = document.getElementById('bb-file')?.files?.[0];
+    const st = document.getElementById('bb-status');
+    if (!file) { if (st) st.textContent = 'Pilih file dulu'; return; }
+    if (file.size > 8 * 1024 * 1024) { if (st) st.textContent = 'Max 8MB'; return; }
+    try {
+      if (st) st.textContent = 'Uploading…';
+      const code = room?.code || 'solo';
+      if (room && !room.isHost) {
+        if (st) st.textContent = 'Hanya host yang boleh upload';
+        return;
+      }
+      const type = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
+      const url = await uploadBillboardMedia(file, code);
+      if (room) await room.setBillboard(url, type);
+      else if (renderer) renderer.applyBillboardMedia({ url, type }, audio);
+      if (st) st.textContent = 'OK';
+    } catch (e) {
+      console.error(e);
+      if (st) st.textContent = e.message || 'Upload gagal (cek Storage rules)';
+    }
+  });
   {
     const st = document.getElementById('login-status');
     if (st) st.textContent = 'Siap — pilih Guest atau Google';
@@ -104,6 +144,11 @@ async function init() {
     }
   });
   updateRotateHint();
+  installLandscapeAutoLock();
+  document.getElementById('btn-force-landscape')?.addEventListener('click', async () => {
+    await tryLandscapeLock();
+    updateRotateHint();
+  });
 
   // If already guest profile saved, skip login optional — still show login first
 }
@@ -167,6 +212,9 @@ function setupLocalGame(fromSave = false) {
   state.data.progress.timeUp = false;
   sanity = new SanityManager();
   jumpscare = new JumpscareManager();
+  pacing = new PacingDirector();
+  vehicleControllers = [];
+  state.data.vehicles = [];
   hideJumpscare();
 
   player.onThrow = (from, to) => {
@@ -287,6 +335,7 @@ function wireUI(canvas) {
       } catch (e) {
         console.warn('Anonymous auth skipped:', e.message || e);
       }
+      await tryLandscapeLock();
       enterMenu();
     } catch (e) {
       console.error(e);
@@ -589,6 +638,59 @@ function hideJumpscare() {
   clearTimeout(jumpscareHideTimer);
 }
 
+function spawnVehicle(type) {
+  if (!state || !player) return;
+  const p = state.data.player.position;
+  const yaw = state.data.player.rotation.yaw;
+  const pos = {
+    x: p.x - Math.sin(yaw) * 4,
+    y: 0,
+    z: p.z - Math.cos(yaw) * 4,
+  };
+  const v = new VehicleController(type, pos);
+  if (!state.data.vehicles) state.data.vehicles = [];
+  state.data.vehicles.push(v);
+  vehicleControllers.push(v);
+  if (renderer) renderer.syncVehicles(state.data.vehicles);
+}
+
+function tryVehicleInteract() {
+  if (!state || !player) return;
+  const p = state.data.player;
+  const myUid = room?.uid || deviceUid();
+  // Dismount
+  if (p.ridingVehicleId && player.keys.has('KeyE')) {
+    if (player._eLatch) return;
+    player._eLatch = true;
+    const v = state.getVehicle(p.ridingVehicleId);
+    if (v) {
+      const spot = findDismountSpot(v, colliders);
+      p.position.x = spot.x;
+      p.position.z = spot.z;
+      p.position.y = 1.7;
+      v.dismount(myUid);
+    }
+    p.ridingVehicleId = null;
+    p.ridingRole = null;
+    return;
+  }
+  if (!player.keys.has('KeyE')) player._eLatch = false;
+  if (p.ridingVehicleId) return;
+  if (!player.keys.has('KeyE') || player._eLatch) return;
+  for (const v of state.data.vehicles || []) {
+    const d = Math.hypot(v.position.x - p.position.x, v.position.z - p.position.z);
+    if (d < 2.2) {
+      player._eLatch = true;
+      const role = v.mount(myUid, !v.driverUid);
+      if (role) {
+        p.ridingVehicleId = v.id;
+        p.ridingRole = role;
+      }
+      break;
+    }
+  }
+}
+
 function startLoop() {
   if (running) return;
   running = true;
@@ -600,9 +702,62 @@ function startLoop() {
     const isAuthority = mode === 'solo' || (room && room.isHost);
 
     player.update(dt);
+    tryVehicleInteract();
+
+    // Vehicle physics (local driver or host)
+    const myUid = room?.uid || deviceUid();
+    for (const v of vehicleControllers) {
+      if (v.driverUid === myUid) {
+        v.driveUpdate(dt, player.keys, colliders, state, audio, myUid);
+        v.checkMonsterHits(state.data.monsters, now, (dmg) => {
+          const pl = state.data.player;
+          if (pl.isDowned) {
+            pl.alive = false;
+            state.data.progress.gameOver = true;
+          } else {
+            pl.health = Math.max(0, pl.health - dmg);
+            if (pl.health <= 0) {
+              pl.isDowned = true;
+              pl.downedTimer = 45;
+            }
+          }
+        });
+      }
+    }
+    // Sync vehicle data objects with controllers
+    state.data.vehicles = vehicleControllers;
+    if (renderer) renderer.syncVehicles(vehicleControllers);
+
+    // Remote vehicles (non-host)
+    if (room && !room.isHost && room.remoteVehicles) {
+      const list = [];
+      for (const [id, rv] of Object.entries(room.remoteVehicles)) {
+        let v = vehicleControllers.find((x) => x.id === id);
+        if (!v) {
+          v = new VehicleController(rv.type || 'motor', { x: rv.x, y: rv.y, z: rv.z }, id);
+          vehicleControllers.push(v);
+        }
+        v.position.x = rv.x; v.position.y = rv.y || 0; v.position.z = rv.z;
+        v.rotation.yaw = rv.yaw || 0;
+        v.driverUid = rv.driver;
+        v.passengerUids = rv.passengers || [];
+        v.speed = rv.speed || 0;
+        list.push(v);
+      }
+      if (renderer) renderer.syncVehicles(vehicleControllers);
+    }
 
     if (isAuthority) {
-      for (const m of monsters) m.update(dt, now);
+      for (const m of monsters) {
+        m._pacingOk = pacing.canTriggerEvent(now);
+        m._onGhostEvent = () => {
+          if (pacing.canTriggerEvent(now)) {
+            pacing.onEventFired(now, 50, 110);
+            if (dread) dread.trigger('distant-knock');
+          }
+        };
+        m.update(dt, now);
+      }
     } else if (room) {
       const rm = room.remoteMonsters;
       state.data.monsters.forEach((m, i) => {
@@ -667,6 +822,7 @@ function startLoop() {
         }
         if (room.isHost) {
           room.writeMonsters(state.data.monsters);
+          room.writeVehicles(vehicleControllers);
           room.writeGame(state.data.progress, state.data.world.weather);
         }
         const last = state.data.world.activeSoundEvents.at(-1);
@@ -814,6 +970,22 @@ function startLoop() {
     const isDarkOutside = !inside && !state.data.player.flashlight && phase !== 'afternoon';
     tickSanity(dt, mDist, isDarkOutside);
     tickJumpscare(dt, mDist, nearestMon ? nearestMon.aiState : null);
+
+    // Pacing-driven dread / world mutation
+    if (pacing.canTriggerEvent(now) && state.data.world.elapsed > 25) {
+      if (Math.random() < 0.0008) {
+        pacing.onEventFired(now, 60, 120);
+        dread?.trigger(Math.random() < 0.5 ? 'distant-knock' : 'branch-snap');
+      }
+      if (state.data.world.elapsed > 90 && (state.data.world.worldEvents?.familyPhoto?.stage || 0) === 0 && Math.random() < 0.0004) {
+        pacing.onEventFired(now, 80, 140);
+        state.triggerWorldEvent('familyPhoto', 1);
+      }
+    }
+    // Billboard from multiplayer
+    if (room?.remoteBillboard && renderer) {
+      renderer.applyBillboardMedia(room.remoteBillboard, audio);
+    }
     const loc = document.getElementById('location-hint');
     if (loc) {
       if (inside) {

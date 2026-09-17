@@ -99,6 +99,32 @@ export class PlayerController {
     if (!p.alive) return;
     p.flashlight = this.flashlightOn;
 
+    // Riding vehicle — camera look stays free; WASD only if driver
+    if (p.ridingVehicleId) {
+      const vData = this.state.getVehicle(p.ridingVehicleId);
+      if (!vData) {
+        p.ridingVehicleId = null;
+        p.ridingRole = null;
+      } else {
+        // position lock to seat (drive physics run elsewhere for driver)
+        const role = p.ridingRole || 'passenger';
+        const seatLocal =
+          role === 'driver'
+            ? (vData.seatOffsets?.DriverSeat || { x: 0, y: 1, z: 0.2 })
+            : (vData.seatOffsets?.PassengerSeat ||
+               vData.seatOffsets?.PassengerSeatFront ||
+               { x: 0, y: 1, z: -0.4 });
+        const cos = Math.cos(vData.rotation.yaw);
+        const sin = Math.sin(vData.rotation.yaw);
+        p.position.x = vData.position.x + (seatLocal.x * cos - seatLocal.z * sin);
+        p.position.z = vData.position.z + (seatLocal.x * sin + seatLocal.z * cos);
+        p.position.y = (vData.position.y || 0) + seatLocal.y;
+        p.moveState = 'riding';
+        p.isRunning = false;
+        return;
+      }
+    }
+
     // Downed: crawl only, countdown to death
     if (p.isDowned) {
       p.isHiding = false;

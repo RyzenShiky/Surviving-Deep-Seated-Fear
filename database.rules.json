@@ -27,6 +27,16 @@
             ".validate": "newData.hasChildren(['x', 'z', 'intensity', 'radius', 'type', 't'])"
           }
         },
+        "vehicles": {
+          ".write": "auth != null",
+          "$vid": {
+            ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw'])"
+          }
+        },
+        "billboard": {
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['url', 'type', 'by', 't'])"
+        },
         "game": {
           ".write": "auth != null",
           ".validate": "newData.hasChildren(['gameOver', 'win'])"
