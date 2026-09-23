@@ -145,7 +145,7 @@ export class Renderer {
     }
 
     for (let i = 0; i < 2; i++) {
-      const m = skeletonClone(this.monsterTemplate);
+      const m = this.monsterTemplate.clone(true);
       m.traverse((c) => {
         if (c.isMesh && c.material) c.material = c.material.clone();
       });

@@ -64,7 +64,6 @@ export class AudioManager {
     osc.stop(this.ctx.currentTime + 0.13);
   }
 
-  /** Soft heartbeat thud — rate/volume controlled by caller */
   setRain(on) {
     if (!this.ctx || !this.sfx) return;
     if (on && !this._rainNodes) {
@@ -94,10 +93,13 @@ export class AudioManager {
       const nodes = this._rainNodes;
       this._rainNodes = null;
       setTimeout(() => {
-        try { nodes.src.stop(); } catch {}
+        try {
+          nodes.src.stop();
+        } catch (e) {
+          /* ignore */
+        }
       }, 1200);
     }
-    // already on/off: no-op (avoid gain spam every frame)
   }
 
   playHeartbeat(volume = 0.2) {
@@ -117,7 +119,6 @@ export class AudioManager {
     osc.stop(t0 + 0.2);
   }
 
-  /** Sharp noise burst + falling drone — used by JumpscareManager. */
   playJumpscareStinger() {
     if (!this.ctx || !this.sfx) return;
     const t0 = this.ctx.currentTime;
@@ -154,7 +155,6 @@ export class AudioManager {
     osc.stop(t0 + 0.6);
   }
 
-  /** Filtered noise "whisper" — used at low sanity. Never spatialized; it's in the player's head. */
   playWhisper(intensity = 0.3) {
     if (!this.ctx || !this.sfx) return;
     const t0 = this.ctx.currentTime;
@@ -179,11 +179,6 @@ export class AudioManager {
     src.stop(t0 + 1.2);
   }
 
-  /**
-   * Muffles/warps the whole SFX bus as sanity drops. intensity is 0 (fine)
-   * to 1 (barely-there sanity). Lazily inserts a lowpass filter into the
-   * sfx→master chain the first time it's used.
-   */
   setSanityFilter(intensity) {
     if (!this.ctx || !this.sfx || !this.master) return;
     if (!this._sanityFilter) {
@@ -198,7 +193,6 @@ export class AudioManager {
     const freq = 18000 - clamped * 15000;
     this._sanityFilter.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.3);
   }
-}
 
   playKnock(volume = 0.25) {
     if (!this.ctx || !this.sfx) return;
@@ -238,7 +232,11 @@ export class AudioManager {
     if (!this.ctx || !this.sfx || !url) return;
     try {
       if (this._billboardAudio) {
-        try { this._billboardAudio.stop(); } catch {}
+        try {
+          this._billboardAudio.stop();
+        } catch (e) {
+          /* ignore */
+        }
         this._billboardAudio = null;
       }
       const res = await fetch(url);
@@ -261,3 +259,4 @@ export class AudioManager {
       console.warn('playPositionalFile', e);
     }
   }
+}
