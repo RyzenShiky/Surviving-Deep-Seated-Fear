@@ -102,17 +102,16 @@ export class Renderer {
     // Load GLB models
     const loader = new GLTFLoader();
     try {
-      const monGltf = await loader.loadAsync('./assets/monster.glb');
-      this.monsterTemplate = monGltf.scene;
-      this.monsterAnimations = monGltf.animations || [];
-      this.monsterTemplate.traverse((c) => {
-        if (c.isMesh) {
-          c.castShadow = gfx.shadows;
-          c.receiveShadow = gfx.shadows;
-        }
-      });
+      // Silhouette entity (pointed head + glowing eyes) — primary horror look
+      this.monsterTemplate = this._fallbackMonster();
+      this.monsterAnimations = [];
+      // Optional: still load glb anims if present (ignored if no skeleton match)
+      try {
+        const monGltf = await loader.loadAsync('./assets/monster.glb');
+        this.monsterAnimations = monGltf.animations || [];
+      } catch (_) {}
     } catch (e) {
-      console.warn('monster.glb failed', e);
+      console.warn('monster setup', e);
       this.monsterTemplate = this._fallbackMonster();
     }
     try {
@@ -153,19 +152,92 @@ export class Renderer {
       this.scene.add(m);
       m.userData.anim = this._setupAnimated(m, this.monsterAnimations, 'Patrol');
       this.monsterMeshes.push(m);
-      this._attachNameTag(m, '???', 'monster-' + i);
+      this._attachNameTag(m, '', 'monster-' + i);
     }
   }
 
+  /**
+   * Tall pitch-black silhouette: pointed "hat" head + twin glowing eyes.
+   * Inspired by classic hallway entity horror imagery (original mesh).
+   */
   _fallbackMonster() {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.55, 1.8, 4, 8),
-      new THREE.MeshStandardMaterial({ color: 0x120808, emissive: 0x1a0000, emissiveIntensity: 0.35 })
-    );
-    g.add(body);
+    const matBody = new THREE.MeshStandardMaterial({
+      color: 0x010101,
+      roughness: 1,
+      metalness: 0,
+      emissive: 0x000000,
+    });
+    const matEye = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xe8f0ff,
+      emissiveIntensity: 4,
+      roughness: 0.2,
+    });
+
+    // Torso — tall, thin, slightly flared at shoulders
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.38, 1.55, 8), matBody);
+    torso.position.y = 0.95;
+    g.add(torso);
+
+    // Shoulders / upper cloak mass
+    const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.48, 8, 6), matBody);
+    shoulders.scale.set(1.15, 0.55, 0.7);
+    shoulders.position.y = 1.65;
+    g.add(shoulders);
+
+    // Neck stump
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 0.25, 6), matBody);
+    neck.position.y = 1.95;
+    g.add(neck);
+
+    // Pointed triangular head (wide base, sharp tip) — the "star/horn" silhouette
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.72, 1.15, 3), matBody);
+    head.position.y = 2.55;
+    head.rotation.y = Math.PI / 6;
+    g.add(head);
+
+    // Extra tip for sharper peak
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.45, 3), matBody);
+    tip.position.y = 3.2;
+    tip.rotation.y = Math.PI / 6;
+    g.add(tip);
+
+    // Arms hanging
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 1.35, 5), matBody);
+      arm.position.set(side * 0.42, 1.05, 0.05);
+      arm.rotation.z = side * 0.15;
+      g.add(arm);
+    }
+
+    // Glowing eyes — small discs under the brim of the pointed head
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), matEye);
+      eye.position.set(side * 0.16, 2.28, 0.38);
+      g.add(eye);
+      const glow = new THREE.PointLight(0xddeeff, 0.45, 3.5, 2);
+      glow.position.copy(eye.position);
+      g.add(glow);
+    }
+
+    // Legs
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.85, 5), matBody);
+      leg.position.set(side * 0.16, 0.35, 0);
+      g.add(leg);
+    }
+
+    g.scale.setScalar(1.15);
+    g.traverse((c) => {
+      if (c.isMesh) {
+        c.castShadow = true;
+        c.receiveShadow = false;
+      }
+    });
     return g;
   }
+
 
   _fallbackPlayer() {
     const g = new THREE.Group();
